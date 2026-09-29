@@ -1,0 +1,77 @@
+/**
+ * 文件说明：功能页加载和异常状态的公共样式，在保留顶栏导航的同时提供稳定且可访问的反馈区域。
+ * 颜色继承全局主题变量，不定义页面业务布局或覆盖正常功能页样式。
+ */
+
+.page-state {
+  display: grid;
+  min-height: calc(100vh - 72px);
+  place-items: center;
+  padding: 28px;
+}
+
+.page-state-content {
+  display: grid;
+  max-width: 420px;
+  justify-items: center;
+  gap: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.page-state-content > svg {
+  width: 30px;
+  height: 30px;
+  color: var(--cyan);
+}
+
+.page-state-content strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.page-state-content.is-error > svg {
+  color: var(--orange);
+}
+
+.page-state-content button {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid rgba(60, 214, 247, 0.28);
+  border-radius: 6px;
+  color: var(--cyan);
+  background: rgba(60, 214, 247, 0.08);
+  cursor: pointer;
+  font: inherit;
+}
+
+.page-state-content button:hover,
+.page-state-content button:focus-visible {
+  border-color: var(--cyan);
+  color: var(--text);
+  background: rgba(60, 214, 247, 0.16);
+  outline: none;
+}
+
+.page-state-content button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.page-state-spinner {
+  animation: page-state-spin 800ms linear infinite;
+}
+
+@keyframes page-state-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .page-state {
+    min-height: calc(100vh - 104px);
+  }
+}

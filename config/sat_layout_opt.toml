@@ -1,0 +1,181 @@
+[backend]
+# 后端 API 监听地址。
+host = "127.0.0.1"
+# 后端 API 监听端口。
+port = 10000
+# STEP/STP 原始模型存储目录，相对于项目根目录。
+model_storage_dir = "data/uploads/models"
+# 双 LOD GLB、公共外壳表与 STEP 面映射派生产物目录，相对于项目根目录。
+model_artifact_dir = "data/processed/models"
+# 细节预览线性公差占模型最大包围尺寸的比例。
+model_preview_detail_linear_ratio = 0.0005
+# 细节预览角度公差，单位为度。
+model_preview_detail_angular_degrees = 10.0
+# 交互预览初始线性公差占模型最大包围尺寸的比例。
+model_preview_interaction_linear_ratio = 0.002
+# 交互预览允许使用的最大线性公差比例。
+model_preview_interaction_max_linear_ratio = 0.005
+# 交互预览初始角度公差，单位为度。
+model_preview_interaction_angular_degrees = 20.0
+# 交互预览允许使用的最大角度公差，单位为度。
+model_preview_interaction_max_angular_degrees = 30.0
+# 交互预览目标三角形数量，超出时逐级放宽离散公差。
+model_preview_interaction_triangle_target = 250000
+# 保守外壳判定时每个 STEP 面最多使用的采样点数量。
+model_preview_shell_samples_per_face = 9
+# 外壳射线起点偏移占模型包围盒对角线的比例。
+model_preview_shell_ray_epsilon_ratio = 0.0000001
+# 浏览器预览派生产物版本；变更时自动重建双 LOD、外壳表、面映射和 STEP 拓扑边线。
+model_preview_artifact_version = 3
+# 浏览器合并完成的预览二进制缓存单个文件最大体积，单位为字节；超出时拒绝写入以保护本地磁盘。
+model_preview_runtime_cache_max_bytes = 536870912
+# 旧模型索引缺少设备名称时的兼容默认值；新上传模型默认使用上传文件名（不含扩展名）。
+model_settings_default_device_name = "GPS satellite"
+# 模型设置页的默认比例，必须大于 0。
+model_settings_default_scale = 1.0
+# 模型设置页的默认原始单位，可选 mm、cm 或 m。
+model_settings_default_unit = "mm"
+# 模型设置页默认绕 X 轴旋转角度，可选 0、90、180 或 270 度。
+model_settings_default_rotation_x = 0
+# 模型设置页默认绕 Y 轴旋转角度，可选 0、90、180 或 270 度。
+model_settings_default_rotation_y = 0
+# 模型设置页默认绕 Z 轴旋转角度，可选 0、90、180 或 270 度。
+model_settings_default_rotation_z = 0
+# 卫星设置页默认向上轴向，可选 +X、-X、+Y、-Y、+Z、-Z 或 free（自由）；沿用旧键名，不改变预览 XYZ 旋转。
+model_settings_default_front_orientation = "+Z"
+# 包络读取完整 STEP 时的线性离散公差占模型包围盒对角线比例；1/450 与参考包络输入精度一致。
+model_envelope_step_linear_ratio = 0.0022222222222222222
+# 包络读取完整 STEP 时允许的最小线性离散公差，单位为毫米。
+model_envelope_step_min_linear_tolerance_mm = 0.5
+# 包络读取完整 STEP 时的角度离散公差，单位为度；0.25 弧度对应此值。
+model_envelope_step_angular_degrees = 14.32394487827058
+# 局部轮廓修正使用的投影格数；固定网格用于合并重复投影三角形并控制计算量。
+model_envelope_refinement_grid_size = 384
+# 绕 Z 轴均匀使用的竖向局部修正投影方向数量；20 表示每 9 度覆盖一个唯一投影平面，减少相同圆柱结构在不同观察方位的棱面差异。
+model_envelope_refinement_direction_count = 20
+# 连续性核心相对侧投影短边的内缩比例；12% 仅保留内部连接，不覆盖圆筒、支架和底座间的大尺度收缩。
+model_envelope_connectivity_core_inset_ratio = 0.12
+# 侧投影真实轮廓向外平滑的比例；用于忽略螺钉和细棱等小凸起。
+model_envelope_detail_smoothing_ratio = 0.008
+# 侧投影轮廓简化比例；只合并小尺度锯齿，不允许突破最大内缩核心。
+model_envelope_outline_simplify_ratio = 0.004
+# 平滑后允许直接封连的窄缝宽度占侧投影短边的比例；6% 用于跨过支架窄槽，较宽凹陷继续保留，0 表示关闭封缝。
+model_envelope_gap_bridge_ratio = 0.06
+# 包络算法版本；修改轴向放大或局部轮廓修正规则时递增，使旧产物自动失效。
+model_envelope_artifact_version = 9
+# 模型与包络固化存储目录，相对于项目根目录；数据库文件与每个固化记录的二进制资源都在此目录下。
+model_store_dir = "data/store"
+# 固化存储的 SQLite 数据库文件名，位于 model_store_dir 内。
+model_store_database_name = "sat_layout_opt.sqlite3"
+# 单个固化记录只允许保存一份 0 度基础包络；布局姿态在求解时通过矩阵旋转。
+model_store_max_variants = 1
+
+# 前置配置页配置。
+[pre_config]
+# 卫星数量与自定义整流舱段参数的持久化目录，相对于项目根目录。
+pre_config_dir = "data/pre_config"
+# 前置配置页的 SQLite 数据库文件名，位于 pre_config_dir 内。
+pre_config_database_name = "pre_config.sqlite3"
+# 自定义整流舱段 STEP 构件的子目录名，位于 pre_config_dir 内。
+pre_config_cylinder_subdir = "cylinders"
+# 单类卫星数量下限，用于拒绝无意义的零配置与负数输入。
+min_satellite_count = 0
+# 单类卫星数量上限，用于约束误配置导致的异常写入。
+max_satellite_count = 1000
+# 自定义整流舱段底面半径下限，单位为毫米，必须大于 0。
+min_cylinder_radius_mm = 0.001
+# 自定义整流舱段高度下限，单位为毫米，必须大于 0。
+min_cylinder_height_mm = 0.001
+# 自定义整流舱段底面半径、高度及整流罩半径的上限，单位为毫米，用于约束异常写入。
+max_cylinder_size_mm = 1000000.0
+# 自定义整流舱段圆周方向的分段数量，用于生成 B-Rep 侧面的顶点点位。
+cylinder_radial_segments = 96
+# 新打开前置配置页时预填的整流舱段底面半径区间两端默认值，单位为毫米。
+default_cylinder_radius_mm = 400.0
+# 自定义整流舱段中轴（中心杆）半径的下限，单位为毫米，必须大于 0。
+min_axis_radius_mm = 0.001
+# 新打开前置配置页时预填的中轴半径，单位为毫米。
+default_axis_radius_mm = 80.0
+# 整流罩半径下限，单位为毫米，必须大于 0。
+min_fairing_shell_radius_mm = 0.001
+# 新打开前置配置页时预填的整流罩半径，单位为毫米，必须大于默认整流舱底面半径。
+default_fairing_shell_radius_mm = 800.0
+# 新打开前置配置页时预填的整流舱段高度区间两端默认值，单位为毫米。
+default_cylinder_height_mm = 3600.0
+
+# 分层布局优化参数；没有任务超时或总迭代次数上限。
+[layout_optimization]
+# 历史项目名称的最大字符数；重命名只改变展示名称，不改原始任务备注。
+history_name_max_length = 120
+# 优化任务输入、进度与结果的本地持久化目录。
+storage_dir = "data/history/layout_optimization"
+# 固定交付的不同布局数量。
+candidate_count = 5
+# 结构去重时安装轴向矩阵保留的小数位数，用于消除坐标变换浮点噪声。
+candidate_orientation_decimals = 6
+# 指定安装面到舱体安装位置的悬高范围默认最小值，单位为毫米。
+min_suspension_mm = 0.0
+# 指定安装面到舱体安装位置的悬高范围默认最大值，单位为毫米。
+max_suspension_mm = 20.0
+# 圆柱半径扫描步长默认值，单位为毫米；布局页可按任务覆盖。
+radius_step_mm = 1.0
+# 每次连续求解的迭代数；单次未收敛后继续尝试，不作为整个任务的停止条件。
+local_iterations = 300
+# 每个半径点每个层数保留的组合数量；固定值用于完整半径扫描。
+partition_beam = 64
+# 每个半径点每个组合尝试的环向排序数量；固定值用于完整半径扫描。
+ordering_trials = 8
+# 可重复搜索的默认随机种子。
+random_seed = 42
+# 几何验收的浮点误差，单位为毫米。
+geometry_tolerance_mm = 0.0001
+# 安装面法向与向上轴单位向量的无量纲误差；独立于毫米长度容差。
+orientation_tolerance = 0.000001
+# 两个侧挂层必须至少相差的质量，单位为千克。
+layer_mass_margin_kg = 0.000001
+# 左侧栏保留的最近进度记录条数，完整输入和最终结果单独持久化。
+progress_history_size = 80
+
+# 布局安装表“长度、高度、宽度、水平、竖直”五列的固定默认值；末列重量读取方案保存的单星质量。
+[layout_optimization.export]
+# “长度”列默认值，单位为毫米。
+length_mm = 150
+# “高度”列默认值，单位为毫米。
+height_mm = 450
+# “宽度”列默认值，单位为毫米。
+width_mm = 150
+# “水平”列默认值，单位为毫米。
+horizontal_mm = 200
+# “竖直”列默认值，单位为毫米。
+vertical_mm = 200
+
+# 前端静态服务配置。
+[frontend]
+# 前端静态服务器监听地址。
+host = "127.0.0.1"
+# 前端静态服务器监听端口。
+port = 11111
+# 允许通过反向代理访问前端的域名；只写主机名，本机 localhost 与 IP 由 Vite 默认允许。
+allowed_hosts = []
+# 浏览器调用 API 的基地址；使用 / 保持同源，由前端服务将 /api 转发到上述 backend 地址。
+api_base_url = "/"
+# 三维交互期间使用的初始画布像素比。
+preview_interaction_pixel_ratio = 1.0
+# 三维交互期间允许自动降低到的最小画布像素比。
+preview_interaction_min_pixel_ratio = 0.65
+# 三维视图静止时使用的最大画布像素比。
+preview_idle_pixel_ratio_cap = 1.5
+# 三维交互结束后恢复细节预览的等待时间，单位为毫秒。
+preview_idle_delay_ms = 180
+# 连续慢帧触发降低交互像素比的帧耗时阈值，单位为毫秒。
+preview_slow_frame_ms = 20
+# 连续快帧触发恢复交互像素比的帧耗时阈值，单位为毫秒。
+preview_fast_frame_ms = 14
+# 安全包络预览的填充颜色，采用 RGB 十六进制整数。
+preview_envelope_color = 0x39d0e9
+# 安全包络半透明外壳的不透明度，范围为 0 至 1。
+preview_envelope_opacity = 0.22
+# 后台任务运行期间的前端状态轮询间隔，单位为毫秒。
+background_task_running_poll_interval_ms = 1000
+# 后台任务空闲或完成后的前端状态轮询间隔，单位为毫秒。
+background_task_idle_poll_interval_ms = 5000

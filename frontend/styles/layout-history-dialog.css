@@ -1,0 +1,73 @@
+/* 文件说明：历史项目居中弹窗的布局、中文排版和交互状态；独立于侧栏滚动区，兼容深浅主题及窄屏。 */
+
+.layout-history-dialog {
+  --history-dialog-bg: #101e2a;
+  --history-dialog-surface: #172937;
+  --history-dialog-border: #304858;
+  --history-dialog-text: #e1edf5;
+  --history-dialog-muted: #a1b6c6;
+  --history-dialog-accent: #43bed4;
+  --history-dialog-accent-text: #082c38;
+  --history-dialog-danger: #ea9ca8;
+  --history-dialog-danger-bg: #38232e;
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid var(--history-dialog-border);
+  border-radius: 14px;
+  background: var(--history-dialog-bg);
+  color: var(--history-dialog-text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+  font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.layout-history-dialog::backdrop { background: rgba(5, 15, 25, 0.48); backdrop-filter: blur(3px); }
+.layout-history-dialog-header { display: flex; align-items: center; gap: 12px; }
+.layout-history-dialog-header h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; }
+.layout-history-dialog-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--history-dialog-surface); color: var(--history-dialog-accent); }
+.layout-history-dialog-icon svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.layout-history-dialog--delete .layout-history-dialog-icon { background: var(--history-dialog-danger-bg); color: var(--history-dialog-danger); }
+.layout-history-dialog-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--history-dialog-muted); cursor: pointer; }
+.layout-history-dialog-close svg { width: 16px; height: 16px; }
+.layout-history-dialog-close:hover:not(:disabled) { background: var(--history-dialog-surface); color: var(--history-dialog-text); }
+.layout-history-dialog-body { margin-top: 24px; }
+.layout-history-dialog-field { display: grid; gap: 8px; color: var(--history-dialog-muted); font-size: 13px; }
+.layout-history-dialog-field input { box-sizing: border-box; width: 100%; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--history-dialog-border); border-radius: 8px; background: var(--history-dialog-surface); color: var(--history-dialog-text); font: inherit; font-size: 14px; }
+.layout-history-dialog-field input:focus { border-color: var(--history-dialog-accent); outline: none; box-shadow: inset 0 0 0 1px var(--history-dialog-accent); }
+.layout-history-dialog-description { color: var(--history-dialog-muted); font-size: 13px; }
+.layout-history-dialog-description p { margin: 0; }
+.layout-history-dialog-project { display: block; margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--history-dialog-border); border-radius: 8px; background: var(--history-dialog-surface); color: var(--history-dialog-text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.layout-history-dialog-error { margin: 12px 0 0; color: var(--history-dialog-danger); font-size: 13px; overflow-wrap: anywhere; }
+.layout-history-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.layout-history-dialog-actions button { min-width: 84px; height: 36px; padding: 0 16px; border: 1px solid var(--history-dialog-border); border-radius: 8px; background: var(--history-dialog-surface); color: var(--history-dialog-text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.layout-history-dialog-actions button:hover:not(:disabled) { border-color: var(--history-dialog-accent); }
+.layout-history-dialog-actions .layout-history-dialog-confirm { border-color: var(--history-dialog-accent); background: var(--history-dialog-accent); color: var(--history-dialog-accent-text); }
+.layout-history-dialog--delete .layout-history-dialog-confirm { border-color: #b44053; background: #b44053; color: #ffffff; }
+.layout-history-dialog--delete .layout-history-dialog-confirm:hover:not(:disabled) { border-color: #c65668; background: #c65668; }
+.layout-history-dialog button:focus-visible { outline: 2px solid var(--history-dialog-accent); outline-offset: 3px; }
+.layout-history-dialog button:disabled, .layout-history-dialog input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+:root[data-theme="light"] .layout-history-dialog {
+  --history-dialog-bg: #ffffff;
+  --history-dialog-surface: #f4f8fb;
+  --history-dialog-border: #d5e0e8;
+  --history-dialog-text: #203e51;
+  --history-dialog-muted: #60798a;
+  --history-dialog-accent: #0b7892;
+  --history-dialog-accent-text: #ffffff;
+  --history-dialog-danger: #a53e50;
+  --history-dialog-danger-bg: #fbedf0;
+  box-shadow: 0 24px 80px rgba(19, 42, 59, 0.22);
+}
+
+@media (max-width: 420px) {
+  .layout-history-dialog { padding: 20px; }
+}

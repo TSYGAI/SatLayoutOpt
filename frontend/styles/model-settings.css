@@ -1,0 +1,972 @@
+/* 文件说明：模型设置页补充样式，定义包络增量、安装面、包络生成与预览开关；整体分栏复用模型上传页。 */
+
+.model-settings-clearance-hint {
+  margin: 0;
+  color: #8da2b6;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+:root[data-theme="light"] .model-settings-clearance-hint {
+  color: #587184;
+}
+
+.preview-actions .envelope-preview-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 60px;
+  padding: 0 8px;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.envelope-preview-toggle svg {
+  flex: 0 0 auto;
+}
+
+.envelope-preview-toggle .spinning {
+  animation: spin 800ms linear infinite;
+}
+
+.model-settings-envelope-preview-error {
+  margin: 0;
+  color: #ff8b9b;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme="light"] .model-settings-envelope-preview-error {
+  color: #b32b42;
+}
+
+.model-settings-sidebar-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* 将滚动条移到侧栏最右侧，同时保留设置内容原有宽度。 */
+  margin-right: -20px;
+  padding-right: 20px;
+  scrollbar-color: #29404f transparent;
+  scrollbar-width: thin;
+}
+
+.model-settings-sidebar-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.model-settings-sidebar-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-settings-sidebar-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #29404f;
+}
+
+.model-settings-sidebar-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.model-settings-model-section {
+  padding: 0 0 21px;
+  border-bottom: 1px solid rgba(152, 177, 199, 0.12);
+}
+
+.model-settings-model-section .section-heading {
+  margin-bottom: 12px;
+}
+
+.model-settings-select-field {
+  display: grid;
+  gap: 7px;
+  color: #8da2b6;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.model-settings-select-control {
+  position: relative;
+  display: block;
+}
+
+.model-settings-select-trigger {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #dbe8f1;
+  background: #101b26;
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-settings-select-trigger > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-select-trigger > svg {
+  justify-self: center;
+  width: 16px;
+  height: 16px;
+  color: #8da2b6;
+  pointer-events: none;
+  transition: transform 140ms ease;
+}
+
+.model-settings-select-control.open .model-settings-select-trigger > svg {
+  transform: rotate(180deg);
+}
+
+.model-settings-model-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  display: grid;
+  width: 100%;
+  max-height: 240px;
+  padding: 3px 0;
+  overflow-y: auto;
+  border: 1px solid rgba(132, 159, 184, 0.28);
+  border-radius: 5px;
+  background: #101b26;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.model-settings-model-options[hidden] {
+  display: none;
+}
+
+.model-settings-model-option {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  color: #c7d6e2;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-settings-model-option-label {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-select-trigger:hover:not(:disabled),
+.model-settings-select-trigger:focus-visible,
+.model-settings-select-control.open .model-settings-select-trigger {
+  border-color: rgba(57, 208, 233, 0.55);
+  outline: none;
+}
+
+.model-settings-model-option:hover,
+.model-settings-model-option:focus-visible {
+  color: #ecf9fc;
+  background: #17313e;
+  outline: none;
+}
+
+.model-settings-model-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #087fa5;
+}
+
+.model-settings-select-trigger:disabled {
+  color: #71879a;
+  cursor: default;
+}
+
+.model-settings-select-trigger:disabled > svg {
+  color: #71879a;
+}
+
+:root[data-theme="light"] .model-settings-select-field {
+  color: #587184;
+}
+
+:root[data-theme="light"] .model-settings-select-trigger > svg {
+  color: #587184;
+}
+
+:root[data-theme="light"] .model-settings-select-trigger,
+:root[data-theme="light"] .model-settings-model-options {
+  border-color: rgba(80, 109, 132, 0.2);
+  color: #263f54;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .model-settings-model-options {
+  border-color: rgba(80, 109, 132, 0.28);
+  box-shadow: 0 10px 24px rgba(36, 59, 78, 0.16);
+}
+
+:root[data-theme="light"] .model-settings-select-trigger:disabled > svg {
+  color: #71879a;
+}
+
+:root[data-theme="light"] .model-settings-select-trigger:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-select-trigger:focus-visible,
+:root[data-theme="light"] .model-settings-select-control.open .model-settings-select-trigger {
+  border-color: rgba(8, 127, 165, 0.55);
+}
+
+:root[data-theme="light"] .model-settings-model-option {
+  color: #263f54;
+}
+
+:root[data-theme="light"] .model-settings-model-option:hover,
+:root[data-theme="light"] .model-settings-model-option:focus-visible {
+  color: #087fa5;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .model-settings-model-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #087fa5;
+}
+
+.model-settings-form {
+  display: grid;
+  gap: 0;
+  padding-top: 20px;
+}
+
+.model-settings-form-section {
+  display: grid;
+  gap: 13px;
+  padding-bottom: 21px;
+  border-bottom: 1px solid rgba(152, 177, 199, 0.12);
+}
+
+.model-settings-form-section + .model-settings-form-section {
+  padding-top: 20px;
+}
+
+.model-settings-form-section:last-of-type {
+  border-bottom: 0;
+}
+
+.model-settings-section-heading h2 {
+  margin: 0;
+  color: #dbe8f1;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.model-settings-installation-heading {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-settings-clear-face-button {
+  display: inline-flex;
+  flex: 0 0 68px;
+  width: 68px;
+  height: 22px;
+  padding: 0 3px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #8da2b6;
+  background: #101b26;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.model-settings-clear-face-button:hover:not(:disabled),
+.model-settings-clear-face-button:focus-visible,
+.model-settings-pick-button:hover:not(:disabled),
+.model-settings-pick-button:focus-visible {
+  border-color: rgba(57, 208, 233, 0.55);
+  color: #ecf9fc;
+  background: #102531;
+  outline: none;
+}
+
+.model-settings-clear-face-button:disabled,
+.model-settings-pick-button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.model-settings-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+.model-settings-vector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.model-settings-center-input {
+  display: grid;
+  box-sizing: border-box;
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-width: 0;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #dbe8f1;
+  background: #101b26;
+}
+
+.model-settings-center-axis {
+  display: grid;
+  place-items: center;
+  border-right: 1px solid rgba(132, 159, 184, 0.2);
+  color: #69c9d6;
+  background: rgba(57, 208, 233, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.model-settings-center-input input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  appearance: textfield;
+}
+
+.model-settings-center-input input::placeholder {
+  color: #71879a;
+  font-weight: 500;
+}
+
+.model-settings-center-input input::-webkit-inner-spin-button,
+.model-settings-center-input input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.model-settings-center-input:hover,
+.model-settings-center-input:focus-within {
+  border-color: rgba(57, 208, 233, 0.55);
+}
+
+.model-settings-center-input:has(input:disabled) {
+  opacity: 0.5;
+}
+
+.model-settings-center-input input:disabled {
+  cursor: default;
+}
+
+.model-settings-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: #8da2b6;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.model-settings-field small {
+  color: #62788c;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.model-settings-field input,
+.model-settings-field-select-trigger {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #dbe8f1;
+  background: #101b26;
+  font: inherit;
+  text-align: center;
+}
+
+.model-settings-field input::placeholder {
+  color: #71879a;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.model-settings-field-select-control {
+  position: relative;
+  display: block;
+}
+
+.model-settings-field-select-trigger {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.model-settings-field-select-trigger > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-field-select-trigger > svg {
+  justify-self: center;
+  width: 15px;
+  height: 15px;
+  color: #8da2b6;
+  pointer-events: none;
+  transition: transform 140ms ease;
+}
+
+.model-settings-field-select-control.open .model-settings-field-select-trigger > svg {
+  transform: rotate(180deg);
+}
+
+.model-settings-field-select-options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  display: grid;
+  width: 100%;
+  max-height: 190px;
+  padding: 3px 0;
+  overflow-y: auto;
+  border: 1px solid rgba(132, 159, 184, 0.28);
+  border-radius: 5px;
+  background: #101b26;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  scrollbar-color: #29404f transparent;
+  scrollbar-width: thin;
+}
+
+.model-settings-field-select-options::-webkit-scrollbar {
+  width: 6px;
+}
+
+.model-settings-field-select-options::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-settings-field-select-options::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #29404f;
+}
+
+.model-settings-field-select-options::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.model-settings-field-select-options[hidden] {
+  display: none;
+}
+
+.model-settings-field-select-option {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  color: #c7d6e2;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-settings-field-select-option > span {
+  grid-column: 2;
+  overflow: hidden;
+  transform: translateX(var(--settings-select-option-center-offset, 0px));
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-field-select-trigger:hover:not(:disabled),
+.model-settings-field-select-trigger:focus-visible,
+.model-settings-field-select-control.open .model-settings-field-select-trigger {
+  border-color: rgba(57, 208, 233, 0.55);
+  outline: none;
+}
+
+.model-settings-field-select-option:hover,
+.model-settings-field-select-option:focus-visible {
+  color: #ecf9fc;
+  background: #17313e;
+  outline: none;
+}
+
+.model-settings-field-select-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #087fa5;
+}
+
+.model-settings-field-select-trigger:disabled > svg {
+  color: #71879a;
+}
+
+.model-settings-field input:hover,
+.model-settings-field input:focus-visible,
+.model-settings-field-select-trigger:hover:not(:disabled),
+.model-settings-field-select-trigger:focus-visible {
+  border-color: rgba(57, 208, 233, 0.55);
+  outline: none;
+}
+
+.model-settings-installation-summary {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(132, 159, 184, 0.16);
+  border-radius: 5px;
+  background: rgba(16, 27, 38, 0.58);
+}
+
+.model-settings-installation-summary > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #71879a;
+  box-shadow: 0 0 0 3px rgba(113, 135, 154, 0.12);
+}
+
+.model-settings-installation-summary.error > span {
+  background: #ff667b;
+}
+
+.model-settings-installation-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.model-settings-installation-summary strong,
+.model-settings-installation-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-installation-summary strong {
+  color: #dbe8f1;
+  font-size: 12px;
+}
+
+.model-settings-installation-summary small {
+  color: #71879a;
+  font-size: 10px;
+}
+
+.model-settings-installation-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.model-settings-pick-button {
+  display: inline-flex;
+  flex: 0 0 68px;
+  width: 68px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 3px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #8da2b6;
+  background: #101b26;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.model-settings-pick-button.active {
+  border-color: #ffc857;
+  color: #fff2bf;
+  background: #3b3420;
+}
+
+.model-settings-pick-button.active:hover:not(:disabled),
+.model-settings-pick-button.active:focus-visible {
+  border-color: #ffc857;
+  color: #fff2bf;
+  background: #3b3420;
+}
+
+.model-settings-pick-button svg {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+}
+
+.model-settings-pick-button .spinning {
+  animation: spin 800ms linear infinite;
+}
+
+.model-settings-envelope-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.model-settings-envelope-actions button {
+  display: inline-flex;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(57, 208, 233, 0.34);
+  border-radius: 5px;
+  color: #cfeef2;
+  background: #102531;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.model-settings-envelope-actions button:hover:not(:disabled),
+.model-settings-envelope-actions button:focus-visible {
+  border-color: #39d0e9;
+  color: #ffffff;
+  background: #153442;
+  outline: none;
+}
+
+.model-settings-envelope-actions button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.model-settings-envelope-actions svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.model-settings-envelope-actions .spinning {
+  animation: spin 800ms linear infinite;
+}
+
+.model-settings-envelope-status {
+  display: flex;
+  min-width: 0;
+  margin: -4px 0 0;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  color: #71879a;
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-settings-envelope-status::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #71879a;
+  content: '';
+}
+
+.model-settings-envelope-status.ready {
+  color: #79d8bc;
+}
+
+.model-settings-envelope-status.ready::before {
+  background: #38c997;
+}
+
+.model-settings-envelope-status.generating,
+.model-settings-envelope-status.generating-all {
+  color: #cfeef2;
+}
+
+.model-settings-envelope-status.generating::before,
+.model-settings-envelope-status.generating-all::before {
+  background: #39d0e9;
+  box-shadow: 0 0 0 3px rgba(57, 208, 233, 0.12);
+}
+
+.model-settings-envelope-status.error {
+  color: #ff8b9b;
+}
+
+.model-settings-envelope-status.error::before {
+  background: #ff667b;
+}
+
+.model-settings-store-status {
+  margin: -4px 0 0;
+  overflow: hidden;
+  color: #71879a;
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-viewport canvas.installation-picking {
+  cursor: crosshair;
+}
+
+:root[data-theme="light"] .model-settings-model-section,
+:root[data-theme="light"] .model-settings-form-section {
+  border-color: rgba(74, 103, 127, 0.14);
+}
+
+:root[data-theme="light"] .model-settings-sidebar-body {
+  scrollbar-color: #a9bdca transparent;
+}
+
+:root[data-theme="light"] .model-settings-sidebar-body::-webkit-scrollbar-thumb {
+  background: #a9bdca;
+}
+
+:root[data-theme="light"] .model-settings-section-heading h2,
+:root[data-theme="light"] .model-settings-field input,
+:root[data-theme="light"] .model-settings-field-select-trigger {
+  color: #263f54;
+}
+
+:root[data-theme="light"] .model-settings-field {
+  color: #587184;
+}
+
+:root[data-theme="light"] .model-settings-field small,
+:root[data-theme="light"] .model-settings-field input::placeholder {
+  color: #667d91;
+}
+
+:root[data-theme="light"] .model-settings-field input,
+:root[data-theme="light"] .model-settings-field-select-trigger,
+:root[data-theme="light"] .model-settings-field-select-options {
+  border-color: rgba(80, 109, 132, 0.2);
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .model-settings-center-input {
+  border-color: rgba(80, 109, 132, 0.2);
+  color: #263f54;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .model-settings-center-axis {
+  border-color: rgba(80, 109, 132, 0.2);
+  color: #356a6a;
+  background: #e7f0ef;
+}
+
+:root[data-theme="light"] .model-settings-center-input input::placeholder {
+  color: #667d91;
+}
+
+:root[data-theme="light"] .model-settings-center-input:hover,
+:root[data-theme="light"] .model-settings-center-input:focus-within {
+  border-color: rgba(8, 127, 165, 0.55);
+}
+
+:root[data-theme="light"] .model-settings-clear-face-button {
+  border-color: rgba(80, 109, 132, 0.2);
+  color: #587184;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .model-settings-clear-face-button:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-clear-face-button:focus-visible,
+:root[data-theme="light"] .model-settings-pick-button:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-pick-button:focus-visible {
+  border-color: rgba(8, 127, 165, 0.55);
+  color: #087fa5;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .model-settings-installation-summary {
+  border-color: rgba(80, 109, 132, 0.16);
+  background: rgba(243, 248, 251, 0.78);
+}
+
+:root[data-theme="light"] .model-settings-installation-summary strong {
+  color: #263f54;
+}
+
+:root[data-theme="light"] .model-settings-installation-summary small {
+  color: #667d91;
+}
+
+:root[data-theme="light"] .model-settings-pick-button {
+  border-color: rgba(80, 109, 132, 0.2);
+  color: #587184;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .model-settings-pick-button.active {
+  border-color: #b17a00;
+  color: #765200;
+  background: #fff8df;
+}
+
+:root[data-theme="light"] .model-settings-pick-button.active:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-pick-button.active:focus-visible {
+  border-color: #b17a00;
+  color: #765200;
+  background: #fff8df;
+}
+
+:root[data-theme="light"] .model-settings-envelope-actions button {
+  border-color: rgba(8, 127, 165, 0.32);
+  color: #285d70;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .model-settings-envelope-actions button:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-envelope-actions button:focus-visible {
+  border-color: #087fa5;
+  color: #075f7c;
+  background: #dceff4;
+}
+
+:root[data-theme="light"] .model-settings-envelope-status {
+  color: #667d91;
+}
+
+:root[data-theme="light"] .model-settings-envelope-status.ready {
+  color: #147557;
+}
+
+:root[data-theme="light"] .model-settings-envelope-status.generating,
+:root[data-theme="light"] .model-settings-envelope-status.generating-all {
+  color: #087fa5;
+}
+
+:root[data-theme="light"] .model-settings-envelope-status.error {
+  color: #b32b42;
+}
+
+:root[data-theme="light"] .model-settings-field input:hover,
+:root[data-theme="light"] .model-settings-field input:focus-visible,
+:root[data-theme="light"] .model-settings-field-select-trigger:hover:not(:disabled),
+:root[data-theme="light"] .model-settings-field-select-trigger:focus-visible,
+:root[data-theme="light"] .model-settings-field-select-control.open .model-settings-field-select-trigger {
+  border-color: rgba(8, 127, 165, 0.55);
+}
+
+:root[data-theme="light"] .model-settings-field-select-trigger > svg {
+  color: #587184;
+}
+
+:root[data-theme="light"] .model-settings-field-select-options {
+  border-color: rgba(80, 109, 132, 0.28);
+  box-shadow: 0 10px 24px rgba(36, 59, 78, 0.16);
+  scrollbar-color: #a9bdca transparent;
+}
+
+:root[data-theme="light"] .model-settings-field-select-options::-webkit-scrollbar-thumb {
+  background: #a9bdca;
+}
+
+:root[data-theme="light"] .model-settings-field-select-option {
+  color: #263f54;
+}
+
+:root[data-theme="light"] .model-settings-field-select-option:hover,
+:root[data-theme="light"] .model-settings-field-select-option:focus-visible {
+  color: #087fa5;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .model-settings-field-select-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #087fa5;
+}
+
+@media (max-width: 420px) {
+  .model-settings-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .model-settings-vector-grid {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 1100px) and (min-width: 901px) {
+  .model-settings-sidebar-body {
+    margin-right: -16px;
+    padding-right: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .model-settings-sidebar-body {
+    margin-right: 0;
+    padding-right: 0;
+    overflow-y: visible;
+    scrollbar-width: auto;
+  }
+
+  .model-settings-sidebar-body::-webkit-scrollbar {
+    width: auto;
+  }
+}

@@ -1,0 +1,258 @@
+/* 文件说明：布局优化页的表单、操作按钮中文排版、候选和历史样式；兼容深浅主题、键盘焦点和移动端。 */
+
+.layout-optimization-workspace {
+  grid-template-columns: minmax(340px, 390px) minmax(0, 1fr);
+}
+
+.layout-optimization-sidebar-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin-right: -20px;
+  padding-right: 20px;
+  scrollbar-color: #29404f transparent;
+  scrollbar-width: thin;
+}
+
+.layout-optimization-sidebar-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.layout-optimization-sidebar-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #29404f;
+}
+
+.layout-optimization-section {
+  display: grid;
+  gap: 13px;
+  padding-bottom: 21px;
+  border-bottom: 1px solid rgba(152, 177, 199, 0.12);
+}
+
+.layout-optimization-section + .layout-optimization-section {
+  padding-top: 20px;
+}
+
+.layout-optimization-section:last-child {
+  border-bottom: 0;
+}
+
+.layout-optimization-hint,
+.layout-optimization-message {
+  margin: 0;
+  color: #8da2b6;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.layout-optimization-message {
+  color: #f6ad62;
+}
+
+.layout-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.layout-parameter-card {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(132, 159, 184, 0.16);
+  border-radius: 5px;
+  background: #101b26;
+}
+
+.layout-parameter-card small {
+  overflow: hidden;
+  color: #71879a;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-parameter-card strong {
+  color: #dbe8f1;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.layout-optimization-stats {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.layout-input { display: grid; gap: 6px; min-width: 0; color: #8da2b6; font-size: 11px; }
+.layout-checkbox { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.layout-checkbox input { accent-color: #39d0e9; }
+.layout-input input, .layout-input textarea, .layout-input select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #29404f; border-radius: 5px; padding: 9px; color: #dbe8f1; background: #101b26; font: inherit; font-size: 12px; }
+.layout-input input:not([type="checkbox"]), .layout-input select { text-align: center; }
+.layout-input select { text-align-last: center; }
+.layout-input select option { text-align: center; }
+.layout-input input:focus, .layout-input textarea:focus, .layout-input select:focus { border-color: #39d0e9; outline: none; box-shadow: inset 0 0 0 1px #39d0e9; }
+.layout-input input:disabled, .layout-input textarea:disabled { opacity: 0.65; }
+.layout-com-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.layout-satellite summary { cursor: pointer; font-size: 12px; }
+.layout-satellite summary span { float: right; color: #39d0e9; }
+.layout-optimization-section .layout-satellite-list > summary { font-size: 13px; font-weight: 700; }
+.layout-satellite-list-items { display: grid; gap: 13px; margin-top: 13px; }
+.layout-satellite { border: 1px solid #29404f; border-radius: 6px; padding: 10px; }
+.layout-satellite[open] > div { margin-top: 12px; }
+.layout-optimization-section h3 { margin: 0; font-size: 13px; }
+.layout-optimization-section details > summary { cursor: pointer; font-size: 12px; }
+.layout-optimization-section details[open] > .layout-parameter-grid { margin-top: 12px; }
+.layout-task-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.layout-task-actions button, .layout-optimization-section > button, .layout-history-list-items > button { padding: 10px 12px; border-radius: 5px; cursor: pointer; }
+.layout-task-actions button:disabled, .layout-optimization-section button:disabled { cursor: default; opacity: 0.55; }
+
+/* 按钮优先使用中文无衬线字体的半粗字重，避免中西文混排突兀；禁用态与内收焦点保持清晰。 */
+.layout-optimization-section .layout-action-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #2c4354;
+  border-radius: 8px;
+  background: #111f2a;
+  color: #bcd0dd;
+  font: inherit;
+  font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  font-synthesis: none;
+  line-height: 20px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.layout-action-button svg { flex: 0 0 16px; width: 16px; height: 16px; stroke-width: 1.75; color: #52c7dd; }
+.layout-optimization-section .layout-action-button:hover:not(:disabled) { background: #18313e; border-color: #4695a8; color: #e0f6fa; }
+.layout-optimization-section .layout-action-button--primary {
+  flex: 1;
+  border-color: #39bdd4;
+  background: #39bdd4;
+  color: #062c38;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+/* 实心播放图标按中文字形的视觉中心下移，避免看起来高于按钮文字。 */
+.layout-action-button--primary svg { display: block; color: currentColor; fill: currentColor; stroke-width: 0; transform: translateY(1px); }
+.layout-optimization-section .layout-action-button--primary:hover:not(:disabled) { background: #55cfe3; border-color: #55cfe3; color: #062c38; }
+.layout-optimization-section .layout-action-button--cancel {
+  flex: 0 0 auto;
+  border-color: #66434a;
+  background: #281d27;
+  color: #f0a7ad;
+}
+.layout-action-button--cancel svg { color: currentColor; }
+.layout-optimization-section .layout-action-button--cancel:hover:not(:disabled) { background: #3b242e; border-color: #aa6570; color: #ffc5ca; }
+.layout-optimization-section .layout-action-button:active:not(:disabled) { box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.14); }
+.layout-optimization-section .layout-action-button:focus-visible { outline: 2px solid #65d5e9; outline-offset: -3px; }
+.layout-optimization-section .layout-action-button--primary:focus-visible { outline-color: #062c38; }
+.layout-optimization-section .layout-action-button--cancel:focus-visible { outline-color: #f0a7ad; }
+.layout-optimization-section .layout-action-button:disabled { background: #172d3a; border-color: #2a4352; color: #a4bac8; opacity: 1; box-shadow: none; cursor: not-allowed; }
+.layout-optimization-section .layout-action-button:disabled svg { color: currentColor; }
+:root[data-theme="light"] .layout-action-button { background: #f7fafc; border-color: #c9d9e3; color: #476375; }
+:root[data-theme="light"] .layout-action-button svg { color: #18869d; }
+:root[data-theme="light"] .layout-action-button:hover:not(:disabled) { background: #edf7fa; border-color: #7fb6c5; color: #17647b; }
+:root[data-theme="light"] .layout-action-button--primary { background: #0b7892; border-color: #086b83; color: #ffffff; }
+:root[data-theme="light"] .layout-action-button--primary svg { color: currentColor; }
+:root[data-theme="light"] .layout-action-button--primary:hover:not(:disabled) { background: #066d85; border-color: #066d85; color: #ffffff; }
+:root[data-theme="light"] .layout-action-button--primary:focus-visible { outline-color: #ffffff; }
+:root[data-theme="light"] .layout-action-button--cancel { background: #fffcfc; border-color: #e1c6ca; color: #9d4955; }
+:root[data-theme="light"] .layout-action-button--cancel svg { color: currentColor; }
+:root[data-theme="light"] .layout-action-button--cancel:hover:not(:disabled) { background: #fcebed; border-color: #ce8f99; color: #963749; }
+:root[data-theme="light"] .layout-action-button--cancel:focus-visible { outline-color: #ae4858; }
+:root[data-theme="light"] .layout-action-button:disabled { background: #e9f0f4; border-color: #d1dfe7; color: #526c7c; }
+@media (prefers-reduced-motion: reduce) {
+  .layout-optimization-section .layout-action-button { transition: none; }
+}
+
+.layout-progress-log { max-height: 180px; overflow: auto; padding-left: 20px; color: #8da2b6; font-size: 11px; line-height: 1.7; }
+.layout-history-list > summary h3 { display: inline; }
+.layout-history-list-items { display: grid; gap: 13px; margin-top: 13px; }
+.layout-candidates, .layout-history { display: grid; gap: 8px; }
+.layout-candidates button, .layout-history-item { display: grid; text-align: left; gap: 6px; padding: 10px; border-radius: 6px; background: #101b26; color: #dbe8f1; border: 1px solid #29404f; }
+.layout-candidates button { cursor: pointer; }
+.layout-history-item { min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.layout-history-item.active { border-color: #39d0e9; }
+.layout-history-open { display: grid; gap: 6px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.layout-history-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.layout-history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.layout-history-actions button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #8da2b6; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
+.layout-history-actions svg { width: 14px; height: 14px; stroke-width: 1.65; }
+.layout-history-actions button:hover:not(:disabled) { color: #65d5e9; background: rgba(57, 208, 233, 0.1); }
+.layout-history-actions .layout-history-delete:hover:not(:disabled) { color: #ffa1a1; background: rgba(255, 122, 122, 0.1); }
+.layout-history button:focus-visible { outline: 2px solid #39d0e9; outline-offset: 2px; }
+.layout-candidates button.active { border-color: #39d0e9; box-shadow: inset 3px 0 #39d0e9; }
+.layout-candidates span, .layout-history span, .layout-history small { font-size: 11px; overflow-wrap: anywhere; }
+.layout-placement-list { padding-left: 20px; font-size: 11px; line-height: 1.7; }
+.layout-preview-caption { padding: 8px 12px; margin: 0; font-size: 11px; color: #8da2b6; }
+:root[data-theme="light"] .layout-input { color: #587184; }
+:root[data-theme="light"] .layout-input input, :root[data-theme="light"] .layout-input textarea, :root[data-theme="light"] .layout-input select,
+:root[data-theme="light"] .layout-candidates button, :root[data-theme="light"] .layout-history-item { background: #f7fafc; color: #263f54; border-color: #b4c5d2; }
+:root[data-theme="light"] .layout-history-item.active { border-color: #0f7d99; }
+:root[data-theme="light"] .layout-history-actions button { color: #6a8091; }
+:root[data-theme="light"] .layout-history-actions button:hover:not(:disabled) { color: #0f7d99; background: rgba(15, 125, 153, 0.08); }
+:root[data-theme="light"] .layout-history-actions .layout-history-delete:hover:not(:disabled) { color: #b43841; background: rgba(180, 56, 65, 0.08); }
+:root[data-theme="light"] .layout-candidates button.active { border-color: #0f7d99; box-shadow: inset 3px 0 #0f7d99; }
+:root[data-theme="light"] .layout-preview-caption, :root[data-theme="light"] .layout-progress-log { color: #587184; }
+
+:root[data-theme="light"] .layout-optimization-section {
+  border-color: rgba(74, 103, 127, 0.14);
+}
+
+:root[data-theme="light"] .layout-optimization-hint {
+  color: #587184;
+}
+
+:root[data-theme="light"] .layout-optimization-message {
+  color: #a8621a;
+}
+
+:root[data-theme="light"] .layout-parameter-card {
+  border-color: rgba(74, 103, 127, 0.16);
+  background: #f7fafc;
+}
+
+:root[data-theme="light"] .layout-parameter-card small {
+  color: #667d91;
+}
+
+:root[data-theme="light"] .layout-parameter-card strong {
+  color: #263f54;
+}
+
+@media (max-width: 1100px) {
+  .layout-optimization-workspace {
+    grid-template-columns: 330px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .layout-optimization-sidebar-body {
+    margin-right: 0;
+    padding-right: 0;
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 620px) {
+  .layout-optimization-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .layout-parameter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

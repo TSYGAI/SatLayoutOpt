@@ -1,0 +1,17 @@
+# 文件说明：模型上传与 STEP 派生服务的 Python 运行依赖，安装到项目指定 Conda 环境。
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.5
+python-multipart==0.0.20
+cadquery==2.8.0
+# 包络生成依赖：三角网格截面、二维轮廓运算和可靠三维布尔并集。
+numpy==2.5.2
+scipy==1.18.1
+trimesh==4.12.2
+shapely==2.1.2
+manifold3d==3.3.2
+# 安装参数导出依赖：生成包含数值格式的 Excel 工作簿。
+openpyxl==3.1.5
+# 测试依赖：运行后端单元测试并生成测试报告。
+pytest==9.1.1
+httpx==0.28.1

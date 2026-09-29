@@ -1,0 +1,315 @@
+/* 文件说明：SatLayoutOpt 菜单栏的唯一公共样式，负责品牌、导航、状态和响应式排列。 */
+
+:root {
+  color-scheme: dark;
+  --bg: #06101d;
+  --line: rgba(164, 194, 225, 0.14);
+  --text: #edf5ff;
+  --muted: #8296ad;
+  --cyan: #3cd6f7;
+  --orange: #ffb45c;
+  --green: #57e2a2;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f6fa;
+  --line: rgba(38, 70, 101, 0.16);
+  --text: #172b3d;
+  --muted: #5c7288;
+  --cyan: #087fa5;
+  --orange: #bd7217;
+  --green: #1d7952;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+}
+
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: radial-gradient(circle at 86% 8%, rgba(38, 85, 126, 0.18), transparent 31%), var(--bg);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(18px, 2.4vw, 32px);
+  border-bottom: 1px solid var(--line);
+  background: rgba(7, 17, 31, 0.9);
+}
+
+.brand,
+.top-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.brand {
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-mark {
+  position: relative;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  transform: rotate(30deg);
+}
+
+.brand-mark i {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--cyan);
+  border-radius: 8px;
+}
+
+.brand-mark i:nth-child(2) {
+  border-color: var(--orange);
+  transform: rotate(60deg) scale(0.66);
+}
+
+.brand-mark i:nth-child(3) {
+  border-color: #fff;
+  transform: rotate(120deg) scale(0.4);
+}
+
+.brand strong {
+  display: block;
+  font-size: 18px;
+}
+
+.top-meta em {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.page-nav {
+  position: absolute;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100% - 36px);
+  transform: translateX(-50%);
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.page-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.page-nav a {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #91a8bf;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.page-nav a:hover {
+  border-color: rgba(60, 214, 247, 0.18);
+  color: var(--text);
+  background: rgba(60, 214, 247, 0.08);
+}
+
+.page-nav a.active {
+  border-color: rgba(60, 214, 247, 0.3);
+  color: var(--cyan);
+  background: rgba(60, 214, 247, 0.13);
+  box-shadow: inset 0 -2px 0 var(--cyan);
+}
+
+.top-meta {
+  gap: 20px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  min-width: 70px;
+  height: 31px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(60, 214, 247, 0.25);
+  border-radius: 6px;
+  color: var(--cyan);
+  background: rgba(60, 214, 247, 0.08);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  border-color: var(--cyan);
+  color: var(--text);
+  background: rgba(60, 214, 247, 0.16);
+  outline: none;
+}
+
+.theme-toggle-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.theme-toggle-icon.is-moon {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 68% 30%, transparent 0 44%, currentColor 48% 100%);
+  font-size: 0;
+}
+
+:root[data-theme="light"] .app-shell {
+  background: radial-gradient(circle at 86% 8%, rgba(72, 155, 192, 0.13), transparent 31%), var(--bg);
+}
+
+:root[data-theme="light"] .topbar {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+:root[data-theme="light"] .brand-mark i:nth-child(3) {
+  border-color: #17384f;
+}
+
+:root[data-theme="light"] .page-nav a {
+  color: #536b80;
+}
+
+:root[data-theme="light"] .page-nav a:hover {
+  color: var(--text);
+  background: rgba(8, 127, 165, 0.08);
+}
+
+:root[data-theme="light"] .page-nav a.active {
+  color: var(--cyan);
+  background: rgba(8, 127, 165, 0.11);
+}
+
+:root[data-theme="light"] .theme-toggle {
+  border-color: rgba(8, 127, 165, 0.28);
+  background: rgba(8, 127, 165, 0.08);
+}
+
+.top-meta > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.top-meta > span b {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(87, 226, 162, 0.72);
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .brand {
+    flex: 1 1 auto;
+  }
+
+  .top-meta {
+    flex: 0 0 auto;
+  }
+
+  .page-nav {
+    position: static;
+    width: auto;
+    max-width: none;
+    transform: none;
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin: 2px 0 0;
+    padding: 2px 0 1px;
+  }
+}
+
+@media (max-width: 680px) {
+  .top-meta em {
+    display: none;
+  }
+
+  .top-meta {
+    gap: 10px;
+  }
+
+  .theme-toggle {
+    min-width: 62px;
+    padding: 0 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .page-nav {
+    gap: 2px;
+  }
+
+  .page-nav a {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}
