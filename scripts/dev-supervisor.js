@@ -1,5 +1,5 @@
 /**
- * 文件说明：本地开发进程编排器，并行管理当前 Python 环境的后端和 Node.js 前端。
+ * 文件说明：本地开发进程编排器，并行管理指定 Conda Python 后端和 Node.js 前端。
  * 任一服务退出时会回收另一服务，避免端口与模型处理线程遗留。
  */
 
@@ -10,7 +10,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { readRuntimeConfig } = require('./runtime-config.js');
 
 const projectRoot = path.resolve(__dirname, '..');
-const pythonExecutable = process.env.SAT_LAYOUT_OPT_PYTHON || 'python';
+const pythonExecutable = process.env.SAT_LAYOUT_OPT_PYTHON || 'D:\\Conda_envs\\payload-opt\\python.exe';
 const children = [];
 let closing = false;
 
@@ -67,10 +67,7 @@ async function waitForPort(host, port, timeoutMs = 20000) {
 /** 校验依赖和端口，并启动前后端服务。 */
 async function start() {
   const config = readRuntimeConfig(projectRoot);
-  const pythonCheck = spawnSync(pythonExecutable, ['--version'], { stdio: 'ignore', windowsHide: true });
-  if (pythonCheck.error || pythonCheck.status !== 0) {
-    throw new Error('未找到可用的 Python，请激活项目环境或设置 SAT_LAYOUT_OPT_PYTHON');
-  }
+  if (!fs.existsSync(pythonExecutable)) throw new Error(`未找到指定 Python 环境：${pythonExecutable}`);
   if (!fs.existsSync(path.resolve(projectRoot, 'frontend/node_modules/vite'))) throw new Error('React/Vite 前端依赖未安装，请先在指定环境执行 npm install');
   const occupied = await Promise.all([checkPort(config.backend.host, config.backend.port), checkPort(config.frontend.host, config.frontend.port)]);
   if (occupied[0] || occupied[1]) throw new Error(`开发端口已占用：${occupied[0] ? config.backend.port : config.frontend.port}`);

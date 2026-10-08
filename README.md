@@ -33,7 +33,7 @@ python -m pip install -r backend/requirements.txt
 npm --prefix frontend ci
 ```
 
-Windows 下从该环境运行 `start-dev.bat`；也可以设置 `SAT_LAYOUT_OPT_PYTHON` 指向要使用的 Python 可执行文件。启动后访问 `http://127.0.0.1:11111/frontend/model-upload`。
+Windows 下运行 `start-dev.bat`。启动脚本默认使用 `D:\Conda_envs\payload-opt\python.exe`；如果 Python 环境路径不同，请先修改 `start-dev.bat` 中的 `SAT_LAYOUT_OPT_PYTHON`。启动后访问 `http://127.0.0.1:11111/frontend/model-upload`。
 
 ## 当前边界
 
