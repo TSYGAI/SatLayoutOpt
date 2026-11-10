@@ -1,13 +1,22 @@
 /**
- * 文件说明：前置配置页的数据层，定义按类型区分的卫星数量、整流舱段参数的规范化、校验与展示格式，
- * 并管理用于刷新后恢复未保存输入的会话草稿。
+ * 文件说明：前置配置数据层，规范化后端记录、校验独立的整流罩形态与安装筒请求，并管理会话草稿。
+ * 历史字段仅在读取边界转换；基座上底面和筒体共用半径区间，不重复保存同步值。
  * 本模块只读写 `sessionStorage` 与纯数据；后端仍是参数校验和几何构建的最终权威。
  */
+
+import { formatParameterNumber } from '../../utils/number-format.js';
 
 export const SATELLITE_COUNT_EVENT = 'sat-layout-pre-config-satellite-count';
 
 /** 整流舱段参数会话草稿的存储键，用于刷新后恢复当前状态。 */
 export const FAIRING_DRAFT_STORAGE_KEY = 'sat-layout-pre-config-fairing-draft';
+/** 草稿只保存可编辑字段；共通半径仅占一项，轮廓和外形边界均由后端返回。 */
+const FAIRING_DRAFT_FIELDS = Object.freeze([
+  'min_radius_mm', 'max_radius_mm', 'min_height_mm', 'max_height_mm', 'centroid_max_offset_mm',
+  'base_lower_radius_mm', 'base_height_mm',
+  'fairing_form', 'fairing_cylinder_radius_mm', 'fairing_cylinder_height_mm',
+  'lower_cone_lower_radius_mm', 'lower_cone_height_mm', 'upper_cone_upper_radius_mm', 'upper_cone_height_mm',
+]);
 
 const FALLBACK_LIMITS = Object.freeze({
   min_satellite_count: 0,
@@ -15,11 +24,49 @@ const FALLBACK_LIMITS = Object.freeze({
   min_fairing_radius_mm: 0.001,
   min_fairing_height_mm: 0.001,
   max_fairing_size_mm: 1000000,
-  min_axis_radius_mm: 0.001,
-  min_fairing_shell_radius_mm: 0.001,
+  min_centroid_offset_mm: 0.001,
 });
-/** 卫星类型列表的空值，供页面在加载前使用。 */
-export const EMPTY_SATELLITES = Object.freeze([]);
+/** 图片需求对应的四种整流罩组合，值用于 API，标签用于页面展示。 */
+export const FAIRING_FORM_OPTIONS = Object.freeze([
+  { value: 'lower_cone_cylinder_upper_cone', label: '下锥段 + 圆柱段 + 上锥段' },
+  { value: 'lower_cone_cylinder', label: '下锥段 + 圆柱段' },
+  { value: 'cylinder_upper_cone', label: '圆柱段 + 上锥段' },
+  { value: 'cylinder', label: '圆柱段' },
+]);
+
+/** 规范化整流罩组合值；历史配置和未知值统一回退到圆柱段。 */
+export function normalizeFairingForm(value) {
+  const aliases = {
+    'lower_cone+cylinder+upper_cone': 'lower_cone_cylinder_upper_cone',
+    'lower_cone+cylinder': 'lower_cone_cylinder',
+    'cylinder+upper_cone': 'cylinder_upper_cone',
+  };
+  const normalized = aliases[String(value ?? '')] || String(value ?? '');
+  return FAIRING_FORM_OPTIONS.some((item) => item.value === normalized) ? normalized : 'cylinder';
+}
+
+/** 把后端保存的组合段规整为前端预览可直接使用的结构。 */
+function normalizeFairingProfile(profile, radius, height) {
+  const form = normalizeFairingForm(profile?.form || profile?.fairing_form);
+  const sourceSegments = Array.isArray(profile?.segments) ? profile.segments : [];
+  const segments = sourceSegments.length ? sourceSegments.map((item) => ({ ...item })) : [
+    { kind: 'cylinder', radius_mm: Number(radius), height_mm: Number(height) },
+  ];
+  const totalHeight = Number(profile?.total_height_mm);
+  const maxRadius = Number(profile?.max_radius_mm);
+  return {
+    form,
+    segments,
+    total_height_mm: Number.isFinite(totalHeight) && totalHeight > 0
+      ? totalHeight : segments.reduce((sum, item) => sum + Number(item.height_mm || 0), 0),
+    max_radius_mm: Number.isFinite(maxRadius) && maxRadius > 0
+      ? maxRadius : Math.max(...segments.map((item) => Math.max(
+        Number(item.radius_mm) || 0,
+        Number(item.lower_radius_mm) || 0,
+        Number(item.upper_radius_mm) || 0,
+      ))),
+  };
+}
 
 /** 把后端返回的范围约束规范化为可直接用于表单的数值，非法或非正值回落到默认约束。 */
 export function normalizeLimits(values) {
@@ -33,18 +80,14 @@ export function normalizeLimits(values) {
     min_fairing_radius_mm: toPositiveNumber(source.min_fairing_radius_mm, FALLBACK_LIMITS.min_fairing_radius_mm),
     min_fairing_height_mm: toPositiveNumber(source.min_fairing_height_mm, FALLBACK_LIMITS.min_fairing_height_mm),
     max_fairing_size_mm: sizeMaximum > 0 ? sizeMaximum : FALLBACK_LIMITS.max_fairing_size_mm,
-    min_axis_radius_mm: toPositiveNumber(source.min_axis_radius_mm, FALLBACK_LIMITS.min_axis_radius_mm),
-    min_fairing_shell_radius_mm: toPositiveNumber(
-      source.min_fairing_shell_radius_mm,
-      FALLBACK_LIMITS.min_fairing_shell_radius_mm,
-    ),
+    min_centroid_offset_mm: toPositiveNumber(source.min_centroid_offset_mm, toPositiveNumber(source.min_axis_radius_mm, FALLBACK_LIMITS.min_centroid_offset_mm)),
   };
 }
 
 /**
  * 把数据管理页的固化记录整理为卫星类型清单，数量默认 0。
  * @param {unknown} satellites 后端返回的卫星类型数组。
- * @returns {Array<{ recordId: string, deviceName: string, count: number, updatedAt: string|null }>} 卫星类型清单。
+ * @returns {Array<{ recordId: string, deviceName: string, count: number, updatedAt: string|null, symmetryEnabled: boolean, symmetryMode: string }>} 卫星类型清单，旧记录模式默认为硬约束。
  */
 export function normalizeSatellites(satellites) {
   if (!Array.isArray(satellites)) return [];
@@ -55,6 +98,8 @@ export function normalizeSatellites(satellites) {
       deviceName: typeof item.device_name === 'string' && item.device_name ? item.device_name : item.record_id,
       count: toFiniteNumber(item.count, 0),
       updatedAt: item.updated_at || null,
+      symmetryEnabled: item.symmetry_enabled === true,
+      symmetryMode: item.symmetry_mode === 'soft' ? 'soft' : 'hard',
     }));
 }
 
@@ -65,16 +110,33 @@ export function normalizePreConfig(config) {
   const limits = normalizeLimits(source.limits);
   const legacyRadius = toFiniteNumber(fairing.radius_mm, 0);
   const legacyHeight = toFiniteNumber(fairing.height_mm, 0);
-  const minRadius = toFiniteNumber(fairing.min_radius_mm, legacyRadius);
+  const installation = fairing.installation_tube && typeof fairing.installation_tube === 'object'
+    ? fairing.installation_tube : fairing;
+  const minRadius = toFiniteNumber(installation.min_radius_mm, legacyRadius);
+  const minHeight = toFiniteNumber(installation.min_height_mm, legacyHeight);
+  const profile = normalizeFairingProfile(fairing.fairing_profile, minRadius, minHeight);
+  const cylinder = profile.segments.find((item) => item.kind === 'cylinder') || {};
   const legacyClearance = toFiniteNumber(fairing.radial_clearance_mm, 0);
   return {
     satellites: normalizeSatellites(source.satellites),
     min_radius_mm: minRadius,
-    max_radius_mm: toFiniteNumber(fairing.max_radius_mm, legacyRadius),
-    min_height_mm: toFiniteNumber(fairing.min_height_mm, legacyHeight),
-    max_height_mm: toFiniteNumber(fairing.max_height_mm, legacyHeight),
-    axis_radius_mm: toFiniteNumber(fairing.axis_radius_mm, 0),
+    max_radius_mm: toFiniteNumber(installation.max_radius_mm, toFiniteNumber(fairing.max_radius_mm, legacyRadius)),
+    min_height_mm: minHeight,
+    max_height_mm: toFiniteNumber(installation.max_height_mm, toFiniteNumber(fairing.max_height_mm, legacyHeight)),
+    centroid_max_offset_mm: toFiniteNumber(installation.centroid_max_offset_mm, toFiniteNumber(fairing.centroid_max_offset_mm, fairing.axis_radius_mm)),
+    base_lower_radius_mm: installation.base?.lower_radius_mm ?? '',
+    base_height_mm: installation.base?.height_mm ?? '',
     fairing_radius_mm: toFiniteNumber(fairing.fairing_radius_mm, minRadius + legacyClearance),
+    fairing_form: normalizeFairingForm(fairing.fairing_form || fairing.fairing_profile?.form),
+    fairing_cylinder_radius_mm: toFiniteNumber(
+      fairing.fairing_cylinder_radius_mm,
+      toFiniteNumber(cylinder.radius_mm, minRadius),
+    ),
+    fairing_cylinder_height_mm: toFiniteNumber(
+      fairing.fairing_cylinder_height_mm,
+      toFiniteNumber(cylinder.height_mm, minHeight),
+    ),
+    fairing_profile: profile,
     radial_segments: toFiniteNumber(fairing.radial_segments, 96),
     fairing_stored: Boolean(fairing.stored),
     fairing_updated_at: fairing.updated_at || null,
@@ -95,86 +157,116 @@ export function restoreSavedFairingGeometry(values) {
   const maxRadius = Number(values.max_radius_mm);
   const minHeight = Number(values.min_height_mm);
   const maxHeight = Number(values.max_height_mm);
-  const axisRadius = Number(values.axis_radius_mm);
+  const centroidOffset = Number(values.centroid_max_offset_mm);
   const fairingRadius = Number(values.fairing_radius_mm);
+  const profile = normalizeFairingProfile(values.fairing_profile, minRadius, minHeight);
   if (
     !Number.isFinite(minRadius) || minRadius <= 0
     || !Number.isFinite(maxRadius) || maxRadius < minRadius
     || !Number.isFinite(minHeight) || minHeight <= 0
     || !Number.isFinite(maxHeight) || maxHeight < minHeight
-    || !Number.isFinite(axisRadius) || axisRadius <= 0 || axisRadius >= minRadius
+    || !Number.isFinite(centroidOffset) || centroidOffset <= 0 || centroidOffset >= minRadius
     || !Number.isFinite(fairingRadius) || fairingRadius <= maxRadius
+    || fairingRadius < profile.max_radius_mm
   ) return null;
+  const volume = profile.segments.reduce((sum, item) => {
+    const segmentHeight = Number(item.height_mm) || 0;
+    if (item.kind === 'cylinder') return sum + Math.PI * (Number(item.radius_mm) || 0) ** 2 * segmentHeight;
+    const lower = Number(item.lower_radius_mm) || 0;
+    const upper = Number(item.upper_radius_mm) || 0;
+    return sum + Math.PI * segmentHeight * (lower ** 2 + lower * upper + upper ** 2) / 3;
+  }, 0);
   return {
     kind: 'fairing_segment',
     radius_mm: minRadius,
     height_mm: minHeight,
     min_radius_mm: minRadius,
-    max_radius_mm: maxRadius,
     min_height_mm: minHeight,
     max_height_mm: maxHeight,
     diameter_mm: minRadius * 2,
-    axis_radius_mm: axisRadius,
+    axis_radius_mm: centroidOffset,
+    centroid_max_offset_mm: centroidOffset,
+    installation_tube: { min_radius_mm: minRadius, max_radius_mm: maxRadius, min_height_mm: minHeight,
+      max_height_mm: maxHeight, centroid_max_offset_mm: centroidOffset,
+      base: { lower_radius_mm: Number(values.base_lower_radius_mm), height_mm: Number(values.base_height_mm),
+        min_upper_radius_mm: minRadius, max_upper_radius_mm: maxRadius } },
     fairing_radius_mm: fairingRadius,
-    volume_mm3: Math.PI * minRadius * minRadius * minHeight,
+    fairing_form: normalizeFairingForm(values.fairing_form || values.fairing_profile?.form),
+    profile,
+    fairing_profile: profile,
+    total_height_mm: profile.total_height_mm,
+    max_radius_mm: profile.max_radius_mm,
+    volume_mm3: volume,
     axis: {
       origin: [0, 0, 0],
       direction: [0, 0, 1],
-      radius_mm: axisRadius,
+      radius_mm: centroidOffset,
     },
   };
 }
 
 /**
- * 校验整流舱段表单并转换为后端请求需要的数值。
- * @param {{ min_radius_mm: unknown, max_radius_mm: unknown, min_height_mm: unknown, max_height_mm: unknown, axis_radius_mm?: unknown, fairing_radius_mm?: unknown }} values 表单草稿，长度单位为毫米。
+ * 校验整流罩形态与安装筒输入，直接生成后端请求；仅提交当前形态启用的锥段。
+ * @param {object} values 表单草稿，长度单位为毫米。
  * @param {ReturnType<typeof normalizeLimits>} limits 后端给出的取值范围。
- * @returns {{ minRadiusMm: number, maxRadiusMm: number, minHeightMm: number, maxHeightMm: number, axisRadiusMm: number, fairingRadiusMm: number }} 可直接提交的尺寸区间、中轴半径与整流罩半径。
- * @throws {Error} 尺寸、中轴半径或整流罩半径为空、非有限、非正或超出范围时抛出。
+ * @returns {object} 含 installation_tube、形态、圆柱尺寸和启用锥段尺寸的 API 请求体。
+ * @throws {Error} 尺寸、质心偏移为空、非有限、非正、超出范围或区间倒置时抛出。
  */
 export function buildFairingSegmentPayload(values, limits) {
   const safeLimits = normalizeLimits(limits);
-  const minRadius = parsePositiveInput(values?.min_radius_mm, '整流舱段底面半径最小值');
-  const maxRadius = parsePositiveInput(values?.max_radius_mm, '整流舱段底面半径最大值');
-  const minHeight = parsePositiveInput(values?.min_height_mm, '整流舱段高度最小值');
-  const maxHeight = parsePositiveInput(values?.max_height_mm, '整流舱段高度最大值');
+  const minRadius = parsePositiveInput(values?.min_radius_mm, '安装筒半径最小值');
+  const maxRadius = parsePositiveInput(values?.max_radius_mm, '安装筒半径最大值');
+  const minHeight = parsePositiveInput(values?.min_height_mm, '安装筒高度最小值');
+  const maxHeight = parsePositiveInput(values?.max_height_mm, '安装筒高度最大值');
   if (minRadius < safeLimits.min_fairing_radius_mm || maxRadius > safeLimits.max_fairing_size_mm) {
-    throw new Error(`整流舱段底面半径区间必须在 ${safeLimits.min_fairing_radius_mm} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`);
+    throw new Error(`安装筒半径区间必须在 ${safeLimits.min_fairing_radius_mm} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`);
   }
   if (minHeight < safeLimits.min_fairing_height_mm || maxHeight > safeLimits.max_fairing_size_mm) {
-    throw new Error(`整流舱段高度区间必须在 ${safeLimits.min_fairing_height_mm} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`);
+    throw new Error(`安装筒高度区间必须在 ${safeLimits.min_fairing_height_mm} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`);
   }
   if (minRadius > maxRadius) {
-    throw new Error('整流舱段底面半径最小值不得大于最大值');
+    throw new Error('安装筒半径最小值不得大于最大值');
   }
   if (minHeight > maxHeight) {
-    throw new Error('整流舱段高度最小值不得大于最大值');
+    throw new Error('安装筒高度最小值不得大于最大值');
   }
-  const axisRadius = parsePositiveInput(values?.axis_radius_mm, '中轴半径');
-  if (axisRadius < safeLimits.min_axis_radius_mm) {
-    throw new Error(`中轴半径必须大于等于 ${safeLimits.min_axis_radius_mm} 毫米`);
+  const centroidOffset = parsePositiveInput(values?.centroid_max_offset_mm, '质心最大偏移');
+  if (centroidOffset < safeLimits.min_centroid_offset_mm) {
+    throw new Error(`质心最大偏移必须大于等于 ${safeLimits.min_centroid_offset_mm} 毫米`);
   }
-  if (axisRadius >= minRadius) {
-    throw new Error('中轴半径必须小于整流舱段底面半径最小值');
+  if (centroidOffset >= minRadius) {
+    throw new Error('质心最大偏移必须小于安装筒半径最小值');
   }
-  const fairingRadius = parsePositiveInput(values?.fairing_radius_mm, '整流罩半径');
-  if (
-    fairingRadius < safeLimits.min_fairing_shell_radius_mm
-    || fairingRadius > safeLimits.max_fairing_size_mm
-  ) {
-    throw new Error(
-      `整流罩半径必须在 ${safeLimits.min_fairing_shell_radius_mm} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`,
-    );
-  }
-  if (fairingRadius <= maxRadius) throw new Error('整流罩半径必须大于整流舱段底面半径最大值');
-  return {
-    minRadiusMm: minRadius,
-    maxRadiusMm: maxRadius,
-    minHeightMm: minHeight,
-    maxHeightMm: maxHeight,
-    axisRadiusMm: axisRadius,
-    fairingRadiusMm: fairingRadius,
+  const fairingForm = normalizeFairingForm(values?.fairing_form);
+  const payload = {
+    installation_tube: { min_radius_mm: minRadius, max_radius_mm: maxRadius, min_height_mm: minHeight,
+      max_height_mm: maxHeight, centroid_max_offset_mm: centroidOffset },
+    fairing_form: fairingForm,
   };
+  payload.installation_tube.base = {
+    lower_radius_mm: parsePositiveInput(values?.base_lower_radius_mm, '基座下底面半径'),
+    height_mm: parsePositiveInput(values?.base_height_mm, '基座高度'),
+  };
+  const fields = [
+    ['fairing_cylinder_radius_mm', '整流罩圆柱段半径', safeLimits.min_fairing_radius_mm],
+    ['fairing_cylinder_height_mm', '整流罩圆柱段高度', safeLimits.min_fairing_height_mm],
+  ];
+  if (fairingForm.startsWith('lower_cone')) {
+    fields.push(['lower_cone_lower_radius_mm', '下锥段下底面半径', safeLimits.min_fairing_radius_mm],
+      ['lower_cone_height_mm', '下锥段高度', safeLimits.min_fairing_height_mm]);
+  }
+  if (fairingForm.endsWith('upper_cone')) {
+    fields.push(['upper_cone_upper_radius_mm', '上锥段上底面半径', safeLimits.min_fairing_radius_mm],
+      ['upper_cone_height_mm', '上锥段高度', safeLimits.min_fairing_height_mm]);
+  }
+  for (const [field, label, minimum] of fields) {
+    const value = parsePositiveInput(values?.[field], label);
+    if (value < minimum || value > safeLimits.max_fairing_size_mm) {
+      throw new Error(`${label}必须在 ${minimum} 至 ${safeLimits.max_fairing_size_mm} 毫米之间`);
+    }
+    payload[field] = value;
+  }
+  return payload;
 }
 
 /**
@@ -197,90 +289,41 @@ export function buildSatelliteCountPayload(value, limits) {
 }
 
 /**
- * 比较整流舱段表单草稿与后端参数是否一致。
- * @param {{ min_radius_mm: unknown, max_radius_mm: unknown, min_height_mm: unknown, max_height_mm: unknown, axis_radius_mm?: unknown, fairing_radius_mm?: unknown }} draft 表单草稿。
- * @param {{ min_radius_mm: number, max_radius_mm: number, min_height_mm: number, max_height_mm: number, axis_radius_mm: number, fairing_radius_mm: number } | null} saved 后端已保存参数。
- * @returns {boolean} 尺寸区间、中轴半径与整流罩半径都一致时为 true。
- */
-export function isFairingSegmentDraftSaved(draft, saved) {
-  if (!saved) return false;
-  const minRadius = Number(draft?.min_radius_mm);
-  const maxRadius = Number(draft?.max_radius_mm);
-  const minHeight = Number(draft?.min_height_mm);
-  const maxHeight = Number(draft?.max_height_mm);
-  const axisRadius = Number(draft?.axis_radius_mm);
-  const fairingRadius = Number(draft?.fairing_radius_mm);
-  return Number.isFinite(minRadius) && Number.isFinite(maxRadius)
-    && Number.isFinite(minHeight) && Number.isFinite(maxHeight)
-    && Number.isFinite(axisRadius) && Number.isFinite(fairingRadius)
-    && draft?.fairing_radius_mm !== '' && draft?.fairing_radius_mm !== null
-    && draft?.fairing_radius_mm !== undefined
-    && minRadius === Number(saved.min_radius_mm)
-    && maxRadius === Number(saved.max_radius_mm)
-    && minHeight === Number(saved.min_height_mm)
-    && maxHeight === Number(saved.max_height_mm)
-    && axisRadius === Number(saved.axis_radius_mm)
-    && fairingRadius === Number(saved.fairing_radius_mm);
-}
-
-/**
- * 读取整流舱段会话草稿，刷新页面后用于恢复未保存的输入。
- * @returns {{ min_radius_mm: string, max_radius_mm: string, min_height_mm: string, max_height_mm: string, axis_radius_mm: string, fairing_radius_mm?: string } | null} 合法草稿，缺失或损坏时返回空；旧尺寸和净距草稿会转换为当前字段。
+ * 读取当前可编辑字段，旧安装筒尺寸与中轴字段在此一次性转换，不恢复已删除的半径设置。
+ * @returns {object|null} 字符串草稿；保留主动清空的输入，缺少的形态字段交由后台配置补齐。
  */
 export function readFairingDraft() {
   try {
     const raw = window.sessionStorage.getItem(FAIRING_DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const legacyRadius = parsed.radius_mm === undefined || parsed.radius_mm === null ? '' : String(parsed.radius_mm);
-    const legacyHeight = parsed.height_mm === undefined || parsed.height_mm === null ? '' : String(parsed.height_mm);
-    const minRadius = parsed.min_radius_mm === undefined || parsed.min_radius_mm === null
-      ? legacyRadius : String(parsed.min_radius_mm);
-    const maxRadius = parsed.max_radius_mm === undefined || parsed.max_radius_mm === null
-      ? legacyRadius : String(parsed.max_radius_mm);
-    const minHeight = parsed.min_height_mm === undefined || parsed.min_height_mm === null
-      ? legacyHeight : String(parsed.min_height_mm);
-    const maxHeight = parsed.max_height_mm === undefined || parsed.max_height_mm === null
-      ? legacyHeight : String(parsed.max_height_mm);
-    const axisRadius = parsed.axis_radius_mm === undefined || parsed.axis_radius_mm === null
-      ? '' : String(parsed.axis_radius_mm);
-    const hasFairingRadius = Object.prototype.hasOwnProperty.call(parsed, 'fairing_radius_mm');
-    const legacyClearance = Number(parsed.radial_clearance_mm);
-    const legacyMinRadius = Number(minRadius);
-    const fairingRadius = hasFairingRadius && parsed.fairing_radius_mm !== null
-      ? String(parsed.fairing_radius_mm ?? '')
-      : Number.isFinite(legacyClearance) && legacyClearance > 0 && Number.isFinite(legacyMinRadius)
-        ? String(legacyMinRadius + legacyClearance)
-        : undefined;
-    if (!minRadius && !maxRadius && !minHeight && !maxHeight && !axisRadius && !fairingRadius) return null;
-    return {
-      min_radius_mm: minRadius,
-      max_radius_mm: maxRadius,
-      min_height_mm: minHeight,
-      max_height_mm: maxHeight,
-      axis_radius_mm: axisRadius,
-      ...(fairingRadius !== undefined ? { fairing_radius_mm: fairingRadius } : {}),
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const source = {
+      ...parsed,
+      min_radius_mm: parsed.min_radius_mm ?? parsed.radius_mm,
+      max_radius_mm: parsed.max_radius_mm ?? parsed.radius_mm,
+      min_height_mm: parsed.min_height_mm ?? parsed.height_mm,
+      max_height_mm: parsed.max_height_mm ?? parsed.height_mm,
+      centroid_max_offset_mm: parsed.centroid_max_offset_mm ?? parsed.axis_radius_mm,
+      fairing_form: parsed.fairing_form ?? parsed.fairing_profile?.form,
     };
+    const draft = Object.fromEntries(FAIRING_DRAFT_FIELDS
+      .filter((field) => source[field] !== undefined && source[field] !== null)
+      .map((field) => [field, field === 'fairing_form' ? normalizeFairingForm(source[field]) : String(source[field])]));
+    return Object.keys(draft).length ? draft : null;
   } catch (error) {
     return null;
   }
 }
 
 /**
- * 写入整流舱段会话草稿；存储不可用时静默跳过，不影响页面使用。
- * @param {{ min_radius_mm: unknown, max_radius_mm: unknown, min_height_mm: unknown, max_height_mm: unknown, axis_radius_mm: unknown, fairing_radius_mm: unknown }} draft 当前表单草稿。
+ * 仅写入当前可编辑字段，避免再次存入历史半径、旧中轴字段和重复轮廓；存储不可用时跳过。
+ * @param {object} draft 当前表单草稿。
  */
 export function writeFairingDraft(draft) {
   try {
-    window.sessionStorage.setItem(FAIRING_DRAFT_STORAGE_KEY, JSON.stringify({
-      min_radius_mm: draft?.min_radius_mm ?? '',
-      max_radius_mm: draft?.max_radius_mm ?? '',
-      min_height_mm: draft?.min_height_mm ?? '',
-      max_height_mm: draft?.max_height_mm ?? '',
-      axis_radius_mm: draft?.axis_radius_mm ?? '',
-      fairing_radius_mm: draft?.fairing_radius_mm ?? '',
-    }));
+    window.sessionStorage.setItem(FAIRING_DRAFT_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(FAIRING_DRAFT_FIELDS.map((field) => [field, draft?.[field] ?? '']))));
   } catch (error) {
     // 浏览器禁用会话存储时仅在内存中保留草稿。
   }
@@ -297,10 +340,8 @@ export function clearFairingDraft() {
 
 /** 把毫米尺寸格式化为带单位的紧凑文本。 */
 export function formatMillimeters(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '--';
-  const digits = number >= 1000 ? 0 : number >= 10 ? 2 : 4;
-  return `${number.toFixed(digits)} mm`;
+  const formatted = formatParameterNumber(value, '--');
+  return formatted === '--' ? formatted : `${formatted} mm`;
 }
 
 /** 把立方毫米体积格式化为 mm³ 或 m³ 文本。 */
@@ -308,23 +349,8 @@ export function formatVolume(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return '--';
   // 1 m³ = 1e9 mm³；超过 1e9 mm³ 时改用 m³，避免单行出现过长的数字。
-  if (number >= 1e9) return `${(number / 1e9).toFixed(4)} m³`;
-  const digits = number >= 1000 ? 0 : 2;
-  return `${number.toFixed(digits)} mm³`;
-}
-
-/** 把字节数格式化为带单位的可读体积。 */
-export function formatByteSize(value) {
-  const size = Number(value);
-  if (!Number.isFinite(size) || size <= 0) return '--';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let remaining = size;
-  let index = 0;
-  while (remaining >= 1024 && index < units.length - 1) {
-    remaining /= 1024;
-    index += 1;
-  }
-  return `${remaining.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  if (number >= 1e9) return `${formatParameterNumber(number / 1e9)} m³`;
+  return `${formatParameterNumber(number)} mm³`;
 }
 
 /** 把 UTC ISO-8601 时间戳格式化为本地可读时间，无效输入返回占位符。 */

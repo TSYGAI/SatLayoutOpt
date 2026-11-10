@@ -8,6 +8,11 @@ node_modules/
 .vite/
 dist/
 build/
+# Tauri 失败构建可能遗留的工具生成 schema；成功构建会归档到 data/build。
+frontend/tauri/gen/
+# 防止绕过统一构建入口时把 Cargo 默认产物纳入版本库。
+frontend/tauri/target/
+backend/rust/target/
 
 # 本地配置和环境变量
 .env
@@ -18,12 +23,39 @@ build/
 data/**
 !data/**/
 !data/**/.gitkeep
+# 安装包与下载缓存整体忽略，包括第三方运行库自带的占位文件。
+data/releases/
+data/build/
 logs/*
 !logs/.gitkeep
-test-results/**
-!test-results/**/
-!test-results/**/.gitkeep
+# 忽略任意层级的测试产物，包含误写到 frontend 等子目录的结果；仍保留目录占位文件。
+**/test-results/**
+!**/test-results/**/
+!**/test-results/**/.gitkeep
 
 # 本地开发工具文件
 .idea/
 .vscode/
+
+# GitHub 源码分发：排除测试和非启动脚本，只保留启动依赖。
+/docs/
+/start-dev.bat
+/start-rust.bat
+/tests/
+/test-results/
+/package-installer.bat
+/scripts/*
+!/scripts/cargo_cache.py
+!/scripts/dev-readiness.js
+!/scripts/dev-supervisor.js
+!/scripts/native_toolchain.py
+!/scripts/runtime-config.js
+!/scripts/rust_backend.py
+!/scripts/start-dev.ps1
+!/scripts/desktop/
+/scripts/desktop/*
+!/scripts/desktop/tauri.py
+!/scripts/desktop/startup_icon.py
+/frontend/scripts/*
+!/frontend/scripts/start-server.js
+!/frontend/scripts/prepare-dev-server.js

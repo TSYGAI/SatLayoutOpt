@@ -1,16 +1,13 @@
 /**
- * 文件说明：React 单页应用路由器，在无刷新导航中选择独立功能页组件。
- * BrowserRouter 使用 /frontend 基路径；独立的加载与异常边界确保页面尚未就绪时菜单仍可操作。
+ * 文件说明：React 单页路由器，包含独立人工微调子页；子页不加入顶部功能导航。
+ * 数据路由使用 /frontend 基路径并支持未保存编辑阻断；加载与异常边界保留独立功能页。
  */
 
 import { lazy } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 
 import { getRouterPath, PAGE_ROUTES } from '../page-routes.mjs';
 import { PageLoadBoundary } from './app/PageLoadBoundary.jsx';
-import { DataManagementPage } from './pages/DataManagementPage.jsx';
-import { LayoutOptimizationPage } from './pages/LayoutOptimizationPage.jsx';
-import { PreConfigPage } from './pages/PreConfigPage.jsx';
 
 /** 按需加载包含 Three.js 的模型上传功能页，避免其他入口下载三维渲染依赖。 */
 function loadModelUploadPage() {
@@ -26,6 +23,33 @@ function loadModelSettingsPage() {
 
 const ModelSettingsPage = lazy(loadModelSettingsPage);
 
+/** 按需加载前置配置页，返回 React.lazy 所需的默认组件导出。 */
+function loadPreConfigPage() {
+  return import('./pages/PreConfigPage.jsx').then((module) => ({ default: module.PreConfigPage }));
+}
+
+/** 按需加载布局优化页，避免首页提前处理任务与历史记录组件。 */
+function loadLayoutOptimizationPage() {
+  return import('./pages/LayoutOptimizationPage.jsx').then((module) => ({ default: module.LayoutOptimizationPage }));
+}
+
+/** 按需加载数据管理页，避免首页提前加载固化记录预览。 */
+function loadDataManagementPage() {
+  return import('./pages/DataManagementPage.jsx').then((module) => ({ default: module.DataManagementPage }));
+}
+
+/** 按需加载硬件设置页，返回 React.lazy 所需的默认组件导出。 */
+function loadHardwareConfigPage() {
+  return import('./pages/HardwareConfigPage.jsx').then((module) => ({ default: module.HardwareConfigPage }));
+}
+
+const PreConfigPage = lazy(loadPreConfigPage);
+const LayoutOptimizationPage = lazy(loadLayoutOptimizationPage);
+/** 按需加载人工微调子页，保持入口属于布局优化。 */
+const LayoutRefinementPage = lazy(() => import('./pages/LayoutRefinementPage.jsx').then((module) => ({ default: module.LayoutRefinementPage })));
+const DataManagementPage = lazy(loadDataManagementPage);
+const HardwareConfigPage = lazy(loadHardwareConfigPage);
+
 const LAYOUT_OPTIMIZATION_PATH = getRouterPath('layout-optimization');
 const PAGE_COMPONENTS = {
   'model-upload': ModelUploadPage,
@@ -33,31 +57,25 @@ const PAGE_COMPONENTS = {
   'pre-config': PreConfigPage,
   'layout-optimization': LayoutOptimizationPage,
   'data-management': DataManagementPage,
+  'hardware-config': HardwareConfigPage,
 };
 
-/** 声明五个功能页以及根地址和未知地址的回退规则。 */
-function AppRoutes() {
-  return (
-    <Routes>
-      {PAGE_ROUTES.map((page) => {
-        const Page = PAGE_COMPONENTS[page.id];
-        return (
-          <Route key={page.id} path={page.routerPath} element={
-            <PageLoadBoundary key={page.id} pageTitle={page.label}><Page /></PageLoadBoundary>
-          } />
-        );
-      })}
-      <Route path="/" element={<Navigate to={LAYOUT_OPTIMIZATION_PATH} replace />} />
-      <Route path="*" element={<Navigate to={LAYOUT_OPTIMIZATION_PATH} replace />} />
-    </Routes>
-  );
+/** 声明各功能页以及根地址和未知地址的回退规则。 */
+function createAppRouter() {
+  return createBrowserRouter([
+    { path: '/layout-refinement/:jobId/:candidateId', element: <PageLoadBoundary pageTitle="人工微调"><LayoutRefinementPage /></PageLoadBoundary> },
+    ...PAGE_ROUTES.map((page) => {
+      const Page = PAGE_COMPONENTS[page.id];
+      return { path: page.routerPath, element: <PageLoadBoundary key={page.id} pageTitle={page.label}><Page /></PageLoadBoundary> };
+    }),
+    { path: '/', element: <Navigate to={LAYOUT_OPTIMIZATION_PATH} replace /> },
+    { path: '*', element: <Navigate to={LAYOUT_OPTIMIZATION_PATH} replace /> },
+  ], { basename: '/frontend' });
 }
+
+const router = createAppRouter();
 
 /** 创建使用 /frontend 基路径的 React 单页应用。 */
 export function App() {
-  return (
-    <BrowserRouter basename="/frontend">
-      <AppRoutes />
-    </BrowserRouter>
-  );
+  return <RouterProvider router={router} />;
 }

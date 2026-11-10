@@ -1,21 +1,20 @@
 /**
  * 文件说明：连接模型设置页与独立安全包络渲染器，管理显示开关、加载反馈和卸载清理。
- * 使用后端生成状态控制可用性；未保存草稿期间暂停覆盖层，避免显示过时结果。
+ * 显示开关按模型及产物版本保留于会话；仅几何草稿暂停覆盖层，安装面和安装点保存期间保留当前包络。
  */
 
 import { useEffect, useState } from 'react';
-import { setCurrentModelEnvelopePreview } from '../model-upload/model-upload-page.js';
-import { ENVELOPE_PREVIEW_STATE_EVENT } from './model-envelope-preview.js';
+import { usePageSessionState } from '../../app/page-session-state.js';
+import { setCurrentModelEnvelopePreview } from '../model-upload/model-preview-loader.js';
+import { ENVELOPE_PREVIEW_STATE_EVENT } from './model-preview-events.js';
+import { areModelEnvelopeSettingsEqual } from './model-settings-state.js';
 
 /** 根据当前模型和后端状态加载覆盖层，返回供工具栏使用的显示状态及切换方法。 */
-export function useModelEnvelopePreview({ modelId, envelope, settings, hasDraft }) {
-  const [visible, setVisible] = useState(true);
+export function useModelEnvelopePreview({ modelId, envelope, settings, savedSettings }) {
+  const [visible, setVisible] = usePageSessionState('model-envelope', `${modelId || ''}:${envelope.generated_at || ''}`, true);
   const [display, setDisplay] = useState({ state: 'idle', message: '' });
-  const available = Boolean(modelId && envelope.state === 'ready' && !hasDraft);
-
-  useEffect(() => {
-    setVisible(true);
-  }, [modelId, envelope.generated_at]);
+  const hasGeometryDraft = !savedSettings || !areModelEnvelopeSettingsEqual(settings, savedSettings);
+  const available = Boolean(modelId && envelope.state === 'ready' && !hasGeometryDraft);
 
   useEffect(() => { setDisplay({ state: 'idle', message: '' }); }, [modelId]);
 

@@ -1,0 +1,47 @@
+/** 文件说明：卫星设置页紧凑包络进度样式，批量模型提示统一 13px 加粗且紧贴，兼容主题、窄栏与减少动态效果偏好。 */
+.model-envelope-progress {
+  --envelope-progress-bg: #142532;
+  --envelope-progress-border: #29404f;
+  --envelope-progress-text: #dbe8f1;
+  --envelope-progress-accent: #39d0e9;
+  --envelope-progress-track: #243745;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--envelope-progress-border);
+  border-radius: 6px;
+  background: var(--envelope-progress-bg);
+  color: var(--envelope-progress-text);
+}
+.model-envelope-progress-current-model {
+  margin: 0 0 9px;
+  color: var(--envelope-progress-text);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.model-envelope-progress-current-model > span { font: inherit; }
+.model-envelope-progress-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.model-envelope-progress-heading > svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--envelope-progress-accent); }
+.model-envelope-progress .model-settings-envelope-status {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--envelope-progress-text);
+  font-size: 11px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.model-envelope-progress .model-settings-envelope-status::before { display: none; }
+.model-envelope-progress-percent { flex: 0 0 auto; font-size: 11px; font-variant-numeric: tabular-nums; }
+.model-envelope-progress-track { height: 6px; margin-top: 9px; overflow: hidden; border-radius: 6px; background: var(--envelope-progress-track); }
+.model-envelope-progress-fill { height: 100%; border-radius: inherit; background: var(--envelope-progress-accent); transition: width 300ms ease; }
+.model-envelope-progress-track.indeterminate .model-envelope-progress-fill { opacity: .35; }
+:root[data-theme="light"] .model-envelope-progress {
+  --envelope-progress-bg: #f3f8fb;
+  --envelope-progress-border: #d5e0e8;
+  --envelope-progress-text: #263f54;
+  --envelope-progress-accent: #087fa5;
+  --envelope-progress-track: #e4edf2;
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-envelope-progress-fill { transition: none; }
+}

@@ -1,6 +1,6 @@
 """
-文件说明：管理 STEP/STP、曲面安装基准、固定或自由向上轴及六向包络增量设置、双 LOD 预览和包络生命周期。
-本服务不处理 HTTP；源文件始终是最终数据源，预览与包络产物可删除并从源文件重建。
+文件说明：管理 STEP/STP、安装基准、含独立体素分辨率的模型设置、双 LOD 与包络。
+本服务不处理 HTTP；源文件始终是最终数据源，删除先取消在途转换，再清理源文件与可重建产物。
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from functools import partial
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import re
 from threading import Lock, RLock
@@ -19,15 +18,19 @@ from typing import BinaryIO
 from uuid import uuid4
 import shutil
 import subprocess
-import sys
 
 from app.core.config import runtime_config
+from app.core.paths import application_root, data_root
+from app.core.worker_process import worker_command, worker_environment
 from app.domain.envelope_geometry import ENVELOPE_ALGORITHM, STORED_ENVELOPE_ROTATIONS
 from app.domain.latest_background_task import LatestBackgroundTask
-from app.domain.model_artifacts import SHELL_POLICY
+from app.domain.model_artifacts import INTERACTION_SHELL_POLICY, SHELL_POLICY
 from app.domain.model_envelope import MODEL_ENVELOPE_FORMAT_VERSION, build_envelope_preview_glb, geometry_settings_fingerprint
+from app.domain.model_envelope_settings import default_envelope_settings, normalize_envelope_settings
 from app.domain.model_installation import read_installation_reference
 from app.domain.model_safety_clearance import default_safety_clearance, normalize_safety_clearance
+from app.domain.coordinate_frame import default_coordinate_frame, normalize_coordinate_frame
+from app.domain.model_worker_processes import ModelWorkerProcesses
 
 
 PREVIEW_RUNTIME_CACHE_NAME = "runtime-preview.bin"
@@ -65,7 +68,7 @@ class ModelUploadService:
             artifact_dir: 可选派生产物目录，测试时用于隔离真实数据。
         """
 
-        project_root = Path(__file__).resolve().parents[3]
+        project_root = data_root()
         self.storage_dir = Path(storage_dir or (project_root / runtime_config.model_storage_dir))
         self.artifact_dir = Path(artifact_dir or (project_root / runtime_config.model_artifact_dir))
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -73,6 +76,9 @@ class ModelUploadService:
         self.metadata_path = self.storage_dir / "index.json"
         self._lock = RLock()
         self._artifact_locks: dict[str, Lock] = {}
+        self._preview_locks: dict[tuple[str, str], Lock] = {}
+        self._deleting_models: set[str] = set()
+        self._workers = ModelWorkerProcesses()
         self._envelope_tasks = LatestBackgroundTask("model-envelope")
         loaded_models = self._load_metadata()
         self.models, metadata_changed = self._migrate_legacy_device_names(loaded_models)
@@ -148,6 +154,8 @@ class ModelUploadService:
     def _find(self, model_id: str) -> dict:
         """查找仍有原始文件的内部模型记录，不存在时抛出 LookupError。"""
 
+        if model_id in self._deleting_models:
+            raise LookupError("模型正在删除，已取消转换")
         model = next((item for item in self.models if item.get("id") == model_id), None)
         if model is None or not (self.storage_dir / model.get("stored_name", "")).is_file():
             raise LookupError("找不到指定模型")
@@ -155,7 +163,7 @@ class ModelUploadService:
 
     @staticmethod
     def _default_model_settings() -> dict:
-        """补全旧模型基础默认设置；未设置包络增量时六向均为零，不读取全局增量配置。"""
+        """补全旧模型默认设置；六向增量默认为零，体素分辨率采用集中配置默认值。"""
 
         return {
             "device_name": runtime_config.model_settings_default_device_name,
@@ -166,10 +174,12 @@ class ModelUploadService:
             "rotation_y": runtime_config.model_settings_default_rotation_y,
             "rotation_z": runtime_config.model_settings_default_rotation_z,
             "front_orientation": runtime_config.model_settings_default_front_orientation,
+            "coordinate_frame": default_coordinate_frame(),
             "center_of_mass": None,
             "installation_face_id": None,
             "installation_point": None,
             "safety_clearance_mm": default_safety_clearance(),
+            "envelope_settings": default_envelope_settings(),
         }
 
     @staticmethod
@@ -237,6 +247,7 @@ class ModelUploadService:
         if not isinstance(up_orientation, str) or up_orientation not in MODEL_SETTING_UP_ORIENTATIONS:
             raise ValueError("向上轴向必须是 +X、-X、+Y、-Y、+Z、-Z 或自由（free）")
         center_of_mass = cls._normalize_center_of_mass(candidate.get("center_of_mass"))
+        coordinate_frame = normalize_coordinate_frame(candidate.get("coordinate_frame"))
         installation_face_id = candidate.get("installation_face_id")
         if installation_face_id is not None and (
             not isinstance(installation_face_id, str)
@@ -255,25 +266,31 @@ class ModelUploadService:
             "rotation_y": int(candidate["rotation_y"]),
             "rotation_z": int(candidate["rotation_z"]),
             "front_orientation": candidate["front_orientation"],
+            "coordinate_frame": coordinate_frame,
             "center_of_mass": center_of_mass,
             "installation_face_id": installation_face_id,
             "installation_point": installation_point,
             "safety_clearance_mm": normalize_safety_clearance(candidate["safety_clearance_mm"]),
+            "envelope_settings": normalize_envelope_settings(candidate["envelope_settings"]),
         }
 
     def _validate_installation_reference(self, model_id: str, face_id: str | None, point: dict | None) -> dict | None:
-        """确认安装面属于可见外壳，并把浏览点击点投影回精确 STEP 面后返回规范坐标。"""
+        """通过已发布的快速或高清映射校验安装面，并将点击点投影到原始 STEP。"""
 
         if face_id is None:
             return None
-        mapping_path = self.get_artifact_path(model_id, "mapping")
+        with self._lock:
+            model = self._find(model_id)
+            interaction = self._load_current_manifest(model, "interaction")
+            use_interaction = interaction is not None and "face_mapping" in interaction
+        mapping_path = self.get_artifact_path(model_id, "interaction_mapping" if use_interaction else "mapping")
         try:
             mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("安装面映射不可用，请重新生成高清预览") from error
+            raise ValueError("安装面映射不可用，请重新加载预览") from error
         entries = mapping.get("entries") if isinstance(mapping, dict) else None
         if not isinstance(entries, list) or any(not isinstance(item, dict) for item in entries):
-            raise ValueError("安装面映射不可用，请重新生成高清预览")
+            raise ValueError("安装面映射不可用，请重新加载预览")
         entry = next(
             (item for item in entries if item.get("step_face_id") == face_id),
             None,
@@ -285,7 +302,12 @@ class ModelUploadService:
         if point is None:
             return None
         source_path = self.get_file_path(model_id)
-        reference, _ = read_installation_reference(source_path, face_id, source_point=point)
+        projection_ratio = interaction["parameters"]["actual_linear_ratio"] if use_interaction else None
+        reference, _ = read_installation_reference(
+            source_path, face_id, source_point=point, preview_linear_ratio=projection_ratio,
+            cached_faces_path=self._artifact_tier_path(model_id, "interaction") / "faces.brep" if use_interaction else None,
+            preview_tolerance=interaction["parameters"]["actual_linear_tolerance"] * 2.0 if use_interaction else None,
+        )
         return {axis: float(reference[index]) for index, axis in enumerate("xyz")}
 
     def _artifact_path(self, model_id: str) -> Path:
@@ -303,6 +325,11 @@ class ModelUploadService:
 
         return self._artifact_path(model_id) / "common" / "shell-map.json"
 
+    def _interaction_shell_map_path(self, model_id: str) -> Path:
+        """返回交互档完整面清单路径，避免覆盖细节档外壳清单。"""
+
+        return self._artifact_tier_path(model_id, "interaction") / "shell-map.json"
+
     def _preview_runtime_cache_path(self, model_id: str) -> Path:
         """返回指定模型浏览器合并预览二进制缓存的固定路径。"""
 
@@ -319,12 +346,19 @@ class ModelUploadService:
         with self._lock:
             return self._artifact_locks.setdefault(model_id, Lock())
 
+    def _preview_lock(self, model_id: str, quality: str) -> Lock:
+        """分别保护各档转换；高清工作进程不阻塞快速网格读取或包络计算。"""
+
+        with self._lock:
+            return self._preview_locks.setdefault((model_id, quality), Lock())
+
     @staticmethod
-    def _artifact_parameters() -> dict:
+    def _artifact_parameters(quality: str | None = None) -> dict:
         """汇总影响外壳筛选和两档离散结果的配置参数。"""
 
+        fast_interaction = quality == "interaction" and runtime_config.model_preview_interaction_fast_enabled
         return {
-            "shell_policy": SHELL_POLICY,
+            "shell_policy": INTERACTION_SHELL_POLICY if fast_interaction else SHELL_POLICY,
             "detail_linear_ratio": runtime_config.model_preview_detail_linear_ratio,
             "detail_angular_degrees": runtime_config.model_preview_detail_angular_degrees,
             "interaction_linear_ratio": runtime_config.model_preview_interaction_linear_ratio,
@@ -332,6 +366,7 @@ class ModelUploadService:
             "interaction_angular_degrees": runtime_config.model_preview_interaction_angular_degrees,
             "interaction_max_angular_degrees": runtime_config.model_preview_interaction_max_angular_degrees,
             "interaction_triangle_target": runtime_config.model_preview_interaction_triangle_target,
+            "interaction_fast_enabled": runtime_config.model_preview_interaction_fast_enabled,
             "shell_samples_per_face": runtime_config.model_preview_shell_samples_per_face,
             "shell_ray_epsilon_ratio": runtime_config.model_preview_shell_ray_epsilon_ratio,
             "preview_artifact_version": runtime_config.model_preview_artifact_version,
@@ -339,13 +374,15 @@ class ModelUploadService:
 
     @staticmethod
     def _envelope_parameters(settings: dict) -> dict:
-        """组合 STEP 离散参数和当前模型的六向毫米增量，供生成、失效及并发发布校验共享。"""
+        """组合 STEP 参数、当前模型分辨率与六向增量，供生成、失效及并发发布校验共享。"""
 
         return {
             "step_linear_ratio": runtime_config.model_envelope_step_linear_ratio,
             "step_min_linear_tolerance_mm": runtime_config.model_envelope_step_min_linear_tolerance_mm,
             "step_angular_degrees": runtime_config.model_envelope_step_angular_degrees,
-            "refinement_grid_size": runtime_config.model_envelope_refinement_grid_size,
+            "refinement_grid_size": normalize_envelope_settings(
+                settings.get("envelope_settings", default_envelope_settings())
+            )["refinement_grid_size"],
             "refinement_direction_count": runtime_config.model_envelope_refinement_direction_count,
             "connectivity_core_inset_ratio": runtime_config.model_envelope_connectivity_core_inset_ratio,
             "detail_smoothing_ratio": runtime_config.model_envelope_detail_smoothing_ratio,
@@ -353,6 +390,10 @@ class ModelUploadService:
             "gap_bridge_ratio": runtime_config.model_envelope_gap_bridge_ratio,
             **{f"{direction}_clearance_mm": value for direction, value in settings["safety_clearance_mm"].items()},
             "artifact_version": runtime_config.model_envelope_artifact_version,
+            **{key: getattr(runtime_config, f"model_envelope_{key}") for key in (
+                "gap_bridge_limit_mm", "voxel_max_cells", "surface_batch_cells", "raster_triangle_batch", "raster_batch_cells",
+                "workspace_memory_bytes", "process_memory_limit_bytes", "memory_reserve_bytes",
+            )},
         }
 
     def _source_metadata(self, model: dict) -> dict:
@@ -400,10 +441,15 @@ class ModelUploadService:
         if manifest.get("quality") != quality:
             return None
         actual_parameters = manifest.get("parameters", {})
-        if any(actual_parameters.get(key) != value for key, value in self._artifact_parameters().items()):
+        if any(actual_parameters.get(key) != value for key, value in self._artifact_parameters(quality).items()):
             return None
+        shell_map_path = (
+            self._interaction_shell_map_path(model["id"])
+            if quality == "interaction" and actual_parameters.get("shell_policy") == INTERACTION_SHELL_POLICY
+            else self._shell_map_path(model["id"])
+        )
         try:
-            shell_map = json.loads(self._shell_map_path(model["id"]).read_text(encoding="utf-8"))
+            shell_map = json.loads(shell_map_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         if shell_map.get("source") != expected_source:
@@ -430,9 +476,12 @@ class ModelUploadService:
         browser_asset = manifest.get("browser_asset", {})
         if not (artifact_path / browser_asset.get("file_name", "")).is_file():
             return None
-        if quality == "detail":
+        if quality == "detail" or actual_parameters.get("shell_policy") == INTERACTION_SHELL_POLICY:
             face_mapping = manifest.get("face_mapping", {})
             if not (artifact_path / face_mapping.get("file_name", "")).is_file():
+                return None
+        if quality == "interaction" and actual_parameters.get("shell_policy") == INTERACTION_SHELL_POLICY:
+            if not (artifact_path / "faces.brep").is_file():
                 return None
         return manifest
 
@@ -587,7 +636,7 @@ class ModelUploadService:
             model_id: 已上传模型标识。
             manifest: 调用方已校验为当前有效的包络清单。
         返回：
-            与源模型共用局部坐标的 GLB 字节。
+            与当前模型共用局部坐标的 GLB 字节。
         异常：
             LookupError: 生成期间包络失效，或细节网格不可用。
             ValueError/OSError: 浏览网格转换失败。
@@ -601,10 +650,10 @@ class ModelUploadService:
             return preview_path.read_bytes()
         with self._lock:
             model = self._find(model_id)
-            detail = self._load_current_manifest(model, "detail")
-            if detail is None:
-                raise LookupError("模型细节网格已失效，请重新生成包络")
-            source_path = self._artifact_tier_path(model_id, "detail") / detail["browser_asset"]["file_name"]
+            preview = self._load_current_manifest(model, "detail") or self._load_current_manifest(model, "interaction")
+            if preview is None:
+                raise LookupError("模型预览网格已失效，请重新生成包络")
+            source_path = self._artifact_tier_path(model_id, preview["quality"]) / preview["browser_asset"]["file_name"]
             variant = next(item for item in manifest["variants"] if item["rot_z"] == 0)
             settings = self._normalize_model_settings(model.get("settings"))
         content = build_envelope_preview_glb(directory / variant["file_name"], source_path, settings)
@@ -633,31 +682,29 @@ class ModelUploadService:
         return interaction_generated_at, detail_generated_at
 
     def get_preview_runtime_cache_path(self, model_id: str) -> Path | None:
-        """返回仍与当前双 LOD 匹配的运行时预览缓存路径，不可用时清理并返回空。"""
+        """检查已发布缓存，不等待高清转换锁；未完成双 LOD 时立即返回空供前端显示交互档。"""
 
-        with self._artifact_lock(model_id):
-            with self._lock:
-                model = self._find(model_id)
-                cache_path = self._preview_runtime_cache_path(model_id)
-                if not cache_path.is_file():
-                    return None
-                if self._current_preview_cache_signature(model) is not None:
-                    return cache_path
-                cache_path.unlink(missing_ok=True)
+        with self._lock:
+            model = self._find(model_id)
+            cache_path = self._preview_runtime_cache_path(model_id)
+            if not cache_path.is_file():
                 return None
+            if self._current_preview_cache_signature(model) is not None:
+                return cache_path
+            cache_path.unlink(missing_ok=True)
+            return None
 
     def prepare_preview_runtime_cache_write(self, model_id: str) -> tuple[Path, tuple[str, str]]:
         """确认双 LOD 有效并返回缓存写入目标及当前生成标识。"""
 
-        with self._artifact_lock(model_id):
-            with self._lock:
-                model = self._find(model_id)
-                signature = self._current_preview_cache_signature(model)
-                if signature is None:
-                    raise ValueError("模型双 LOD 尚未就绪，不能保存预览缓存")
-                path = self._preview_runtime_cache_path(model_id)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                return path, signature
+        with self._lock:
+            model = self._find(model_id)
+            signature = self._current_preview_cache_signature(model)
+            if signature is None:
+                raise ValueError("模型双 LOD 尚未就绪，不能保存预览缓存")
+            path = self._preview_runtime_cache_path(model_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path, signature
 
     def publish_preview_runtime_cache(
         self,
@@ -667,15 +714,14 @@ class ModelUploadService:
     ) -> None:
         """原子发布通过格式校验的预览缓存，并拒绝产物更新期间生成的旧数据。"""
 
-        with self._artifact_lock(model_id):
-            with self._lock:
-                model = self._find(model_id)
-                if self._current_preview_cache_signature(model) != expected_signature:
-                    raise ValueError("模型预览产物已更新，请重新加载后再保存缓存")
-                with temporary_path.open("rb") as cache_file:
-                    if cache_file.read(len(PREVIEW_RUNTIME_CACHE_MAGIC)) != PREVIEW_RUNTIME_CACHE_MAGIC:
-                        raise ValueError("预览缓存文件格式无效")
-                temporary_path.replace(self._preview_runtime_cache_path(model_id))
+        with self._lock:
+            model = self._find(model_id)
+            if self._current_preview_cache_signature(model) != expected_signature:
+                raise ValueError("模型预览产物已更新，请重新加载后再保存缓存")
+            with temporary_path.open("rb") as cache_file:
+                if cache_file.read(len(PREVIEW_RUNTIME_CACHE_MAGIC)) != PREVIEW_RUNTIME_CACHE_MAGIC:
+                    raise ValueError("预览缓存文件格式无效")
+            temporary_path.replace(self._preview_runtime_cache_path(model_id))
 
     def get_preview_runtime_cache_limit(self) -> int:
         """返回单个浏览器运行时预览缓存允许写入的最大字节数。"""
@@ -791,19 +837,25 @@ class ModelUploadService:
             model = self._find(model_id)
             return self._normalize_model_settings(model.get("settings"))
 
-    def update_model_settings(self, model_id: str, settings: dict) -> dict:
-        """原子保存模型设置；旧客户端未传包络增量时保留现值，不修改 STEP 或预览资源。"""
+    def update_model_settings(self, model_id: str, settings: dict, expected_settings: dict | None = None) -> dict:
+        """原子保存模型设置；旧客户端未传包络增量或计算设置时保留现值，不修改源文件。"""
 
         with self._lock:
             previous = self._normalize_model_settings(self._find(model_id).get("settings"))
+            if expected_settings is not None and self._normalize_model_settings(expected_settings) != previous:
+                raise RuntimeError("模型设置已被其他操作修改，请重新进入坐标系编辑")
         normalized = self._normalize_model_settings({
-            "safety_clearance_mm": previous["safety_clearance_mm"], **settings,
+            "safety_clearance_mm": previous["safety_clearance_mm"],
+            "envelope_settings": previous["envelope_settings"],
+            "coordinate_frame": previous["coordinate_frame"], **settings,
         })
         normalized["installation_point"] = self._validate_installation_reference(
             model_id, normalized["installation_face_id"], normalized["installation_point"]
         )
         with self._lock:
             model = self._find(model_id)
+            if self._normalize_model_settings(model.get("settings")) != previous:
+                raise RuntimeError("校验期间模型设置已变化，请重新保存")
             stored_settings = {
                 **normalized,
                 "center_of_mass": dict(normalized["center_of_mass"]) if normalized["center_of_mass"] else None,
@@ -817,6 +869,21 @@ class ModelUploadService:
             self.models = next_models
         return self._normalize_model_settings(normalized)
 
+    def _run_model_worker(self, model_id: str, kind: str, request_path: Path, error_path: Path) -> subprocess.CompletedProcess[str]:
+        """在模型锁内校验并登记转换进程，再于锁外等待；删除中的模型禁止启动或返回转换结果。"""
+        with self._lock:
+            self._find(model_id)
+            environment = worker_environment()
+            if kind == "envelope":
+                environment["SAT_LAYOUT_ENVELOPE_SCRATCH_ROOT"] = str(request_path.with_suffix(".workspace"))
+            process = self._workers.start(
+                model_id, worker_command(kind, request_path, error_path), application_root(), environment,
+            )
+        result = self._workers.wait(model_id, process)
+        with self._lock:
+            self._find(model_id)
+        return result
+
     def _build_artifacts(self, model_id: str, quality: str) -> dict:
         """在隔离子进程生成指定质量档的派生产物，并在源模型仍存在时发布。
 
@@ -826,7 +893,7 @@ class ModelUploadService:
         异常：
             ValueError: 工作进程无法解析 STEP 或未生成完整清单。
         副作用：
-            启动短生命周期 Python 进程，并替换对应质量档和公共外壳清单。
+            启动短生命周期 Python 进程，并原子替换对应质量档产物。
         """
 
         if quality not in {"interaction", "detail"}:
@@ -839,7 +906,11 @@ class ModelUploadService:
         temporary_dir = self.artifact_dir / f".{model_id}.{quality}.{task_id}.tmp"
         request_path = self.artifact_dir / f".{model_id}.{quality}.{task_id}.request.json"
         error_path = self.artifact_dir / f".{model_id}.{quality}.{task_id}.error.txt"
-        shell_map_path = self._shell_map_path(model_id)
+        shell_map_path = (
+            self._interaction_shell_map_path(model_id)
+            if quality == "interaction" and self._artifact_parameters(quality)["interaction_fast_enabled"]
+            else self._shell_map_path(model_id)
+        )
         try:
             request_path.write_text(
                 json.dumps({
@@ -847,25 +918,12 @@ class ModelUploadService:
                     "output_dir": str(temporary_dir),
                     "model": public_model,
                     "quality": quality,
-                    "parameters": self._artifact_parameters(),
+                    "parameters": self._artifact_parameters(quality),
                     "reusable_shell_map_path": str(shell_map_path) if shell_map_path.is_file() else None,
                 }, ensure_ascii=False),
                 encoding="utf-8",
             )
-            project_root = Path(__file__).resolve().parents[3]
-            environment = dict(os.environ)
-            backend_path = str(project_root / "backend")
-            environment["PYTHONPATH"] = os.pathsep.join(filter(None, [backend_path, environment.get("PYTHONPATH")]))
-            result = subprocess.run(
-                [sys.executable, "-m", "app.domain.model_artifact_worker", str(request_path), str(error_path)],
-                cwd=project_root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            result = self._run_model_worker(model_id, "artifact", request_path, error_path)
             if result.returncode != 0:
                 detail = error_path.read_text(encoding="utf-8").splitlines()[0] if error_path.exists() else result.stderr.strip()
                 raise ValueError(detail or f"STEP 转换进程异常退出（{result.returncode}）")
@@ -877,14 +935,16 @@ class ModelUploadService:
             with self._lock:
                 self._find(model_id)
                 root_path = self._artifact_path(model_id)
-                common_path = root_path / "common"
-                common_path.mkdir(parents=True, exist_ok=True)
-                temporary_shell_map = common_path / f".shell-map.{task_id}.tmp"
-                shutil.copy2(generated_shell_map, temporary_shell_map)
-                temporary_shell_map.replace(shell_map_path)
-                generated_shell_map.unlink(missing_ok=True)
+                root_path.mkdir(parents=True, exist_ok=True)
                 target_dir = self._artifact_tier_path(model_id, quality)
                 self._publish_directory(temporary_dir, target_dir, task_id)
+                if manifest["parameters"]["shell_policy"] != INTERACTION_SHELL_POLICY:
+                    common_path = root_path / "common"
+                    common_path.mkdir(parents=True, exist_ok=True)
+                    temporary_shell_map = common_path / f".shell-map.{task_id}.tmp"
+                    shutil.copy2(target_dir / "shell-map.json", temporary_shell_map)
+                    temporary_shell_map.replace(shell_map_path)
+                    (target_dir / "shell-map.json").unlink(missing_ok=True)
                 self._preview_runtime_cache_path(model_id).unlink(missing_ok=True)
                 for legacy_name in ("manifest.json", "preview.glb", "face-map.json"):
                     (root_path / legacy_name).unlink(missing_ok=True)
@@ -913,17 +973,24 @@ class ModelUploadService:
             key = f"{counterpart_quality}_triangle_count"
             public_stats[key] = counterpart["stats"]["triangle_count"]
         public_manifest["stats"] = public_stats
-        if quality == "detail":
+        if "face_mapping" in manifest:
+            mapping_route = "interaction-face-map" if quality == "interaction" else "face-map"
             public_manifest["face_mapping"] = {
                 **manifest["face_mapping"],
-                "url": f"/api/models/{model_id}/face-map?v={manifest['generated_at']}",
+                "url": f"/api/models/{model_id}/{mapping_route}?v={manifest['generated_at']}",
             }
         return public_manifest
 
     def _get_manifest(self, model_id: str, quality: str) -> dict:
-        """串行读取或生成指定质量档清单，并转换为公开响应。"""
+        """优先读取已发布清单；仅缺失时等待转换锁并再次校验，避免刷新被高清生成阻塞。"""
 
-        with self._artifact_lock(model_id):
+        with self._lock:
+            model = self._find(model_id)
+            manifest = self._load_current_manifest(model, quality)
+            if manifest is not None:
+                return self._public_manifest(model_id, manifest, quality)
+
+        with self._preview_lock(model_id, quality):
             with self._lock:
                 model = self._find(model_id)
                 manifest = self._load_current_manifest(model, quality)
@@ -939,7 +1006,7 @@ class ModelUploadService:
     def get_preview_manifest(self, model_id: str) -> dict:
         """返回兼容现有接口的细节 GLB 与面映射清单，缺失时生成。
 
-        OpenCascade 在当前运行环境中不支持并行析构，故转换刻意在单一请求线程中串行执行。
+        同一模型通过锁避免重复生成，CAD 操作在隔离工作进程中运行。
         """
 
         return self._get_manifest(model_id, "detail")
@@ -947,9 +1014,11 @@ class ModelUploadService:
     def get_artifact_path(self, model_id: str, kind: str) -> Path:
         """返回已生成的交互/细节 GLB 或面映射路径，不存在时生成并校验。"""
 
-        quality = "interaction" if kind == "interaction_glb" else "detail"
+        quality = "interaction" if kind in {"interaction_glb", "interaction_mapping"} else "detail"
         manifest = self.get_interaction_manifest(model_id) if quality == "interaction" else self.get_preview_manifest(model_id)
-        section = "face_mapping" if kind == "mapping" else "browser_asset"
+        section = "face_mapping" if kind in {"mapping", "interaction_mapping"} else "browser_asset"
+        if section not in manifest:
+            raise LookupError("当前预览档没有 STEP 面映射")
         artifact_path = self._artifact_tier_path(model_id, quality) / manifest[section]["file_name"]
         if not artifact_path.is_file():
             raise LookupError("找不到指定模型的派生产物")
@@ -998,20 +1067,7 @@ class ModelUploadService:
                     else None
                 ),
             }, ensure_ascii=False), encoding="utf-8")
-            project_root = Path(__file__).resolve().parents[3]
-            environment = dict(os.environ)
-            backend_path = str(project_root / "backend")
-            environment["PYTHONPATH"] = os.pathsep.join(filter(None, [backend_path, environment.get("PYTHONPATH")]))
-            result = subprocess.run(
-                [sys.executable, "-m", "app.domain.model_envelope_worker", str(request_path), str(error_path)],
-                cwd=project_root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            result = self._run_model_worker(model_id, "envelope", request_path, error_path)
             if result.returncode != 0:
                 detail = error_path.read_text(encoding="utf-8").splitlines()[0] if error_path.exists() else result.stderr.strip()
                 raise ValueError(detail or f"包络生成进程异常退出（{result.returncode}）")
@@ -1053,13 +1109,14 @@ class ModelUploadService:
             return manifest
         finally:
             shutil.rmtree(temporary_dir, ignore_errors=True)
+            shutil.rmtree(request_path.with_suffix(".workspace"), ignore_errors=True)
             request_path.unlink(missing_ok=True)
             error_path.unlink(missing_ok=True)
 
     def generate_model_envelope(self, model_id: str) -> dict:
-        """确保细节预览可用，并从完整 STEP 重新生成指定模型的正式及显示外层包络。"""
+        """确保快速预览可用，从完整 STEP 生成正式包络，无需等待后台高清转换。"""
 
-        self.get_artifact_path(model_id, "glb")
+        self.get_artifact_path(model_id, "interaction_glb")
         source_step_path = self.get_file_path(model_id)
         with self._artifact_lock(model_id):
             manifest = self._build_envelope(model_id, source_step_path)
@@ -1111,15 +1168,23 @@ class ModelUploadService:
         return self._envelope_tasks.get_latest()
 
     def delete_model(self, model_id: str) -> None:
-        """删除模型原始文件、索引和全部可重建的派生产物。"""
+        """先禁止新转换并终止目标工作进程，再删除源文件、产物及索引；文件占用等故障抛 OSError。"""
 
-        with self._artifact_lock(model_id):
+        with self._lock:
+            model = self._find(model_id)
+            self._deleting_models.add(model_id)
+        try:
+            self._workers.cancel(model_id)
+            with self._artifact_lock(model_id), self._preview_lock(model_id, "interaction"), self._preview_lock(model_id, "detail"):
+                with self._lock:
+                    (self.storage_dir / model["stored_name"]).unlink(missing_ok=True)
+                    shutil.rmtree(self._artifact_path(model_id), ignore_errors=True)
+                    next_models = [item for item in self.models if item.get("id") != model_id]
+                    self._save_metadata(next_models)
+                    self.models = next_models
+        finally:
             with self._lock:
-                model = self._find(model_id)
-                (self.storage_dir / model["stored_name"]).unlink(missing_ok=True)
-                shutil.rmtree(self._artifact_path(model_id), ignore_errors=True)
-                self.models = [item for item in self.models if item.get("id") != model_id]
-                self._save_metadata()
+                self._deleting_models.discard(model_id)
 
     def delete_models(self, model_ids: list[str]) -> int:
         """幂等删除多个模型，并返回实际删除数量。"""

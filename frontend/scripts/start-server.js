@@ -1,11 +1,12 @@
 /**
  * 文件说明：前端 Vite 开发服务器入口，从统一 TOML 读取地址并加载 React 单页配置。
- * 本文件只管理开发服务生命周期，不代理后端请求或包含页面业务逻辑。
+ * 本文件管理开发服务生命周期与首页预热，并通过 IPC 向编排器报告就绪，不包含页面业务逻辑。
  */
 
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareDevServer } from './prepare-dev-server.js';
 
 const require = createRequire(import.meta.url);
 const { readRuntimeConfig } = require('../../scripts/runtime-config.js');
@@ -36,7 +37,10 @@ async function start() {
     },
   });
   await viteServer.listen();
+  console.log('[SatLayoutOpt] 正在准备首页资源，首次启动可能需要几秒……');
+  await prepareDevServer(viteServer, runtimeConfig.frontend.devWarmupPaths);
   viteServer.printUrls();
+  process.send?.({ type: 'frontend-ready' });
   console.log(`[SatLayoutOpt] React 前端已启动：http://${runtimeConfig.frontend.host}:${runtimeConfig.frontend.port}/frontend/model-upload`);
 }
 

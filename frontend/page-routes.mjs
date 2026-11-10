@@ -9,6 +9,7 @@ export const PAGE_ROUTES = Object.freeze([
   Object.freeze({ id: 'pre-config', label: '前置配置', path: '/frontend/pre-config', routerPath: '/pre-config', htmlFile: 'pre-config.html' }),
   Object.freeze({ id: 'layout-optimization', label: '布局优化', path: '/frontend/index', routerPath: '/index', htmlFile: 'index.html' }),
   Object.freeze({ id: 'data-management', label: '数据管理', path: '/frontend/data-management', routerPath: '/data-management', htmlFile: 'data-management.html' }),
+  Object.freeze({ id: 'hardware-config', label: '硬件设置', path: '/frontend/hardware-config', routerPath: '/hardware-config', htmlFile: 'hardware-config.html' }),
 ]);
 
 /** 根据页面标识返回 React Router 路径，未知页面回退到布局优化页。 */

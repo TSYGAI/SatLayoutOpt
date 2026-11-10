@@ -1,4 +1,6 @@
 /** 文件说明：封装布局配置、任务、历史名称/删除与导出接口；只负责 HTTP，不计算业务几何。 */
+import { monitoredFetch } from '../observability/runtime-log.js';
+
 
 import { requestJson, resolveApiUrl } from './model-upload-api.js';
 
@@ -49,7 +51,7 @@ export function getLayoutMeshes(id, signal) {
 /** 请求指定历史任务和候选的 Excel 文件，返回 Blob；失败时抛出可显示的后端错误。 */
 export async function exportLayoutCandidate(id, candidateId) {
   const path = `${base}/jobs/${encodeURIComponent(id)}/candidates/${encodeURIComponent(candidateId)}/export`;
-  const response = await fetch(await resolveApiUrl(path), { cache: 'no-store' });
+  const response = await monitoredFetch(await resolveApiUrl(path), { cache: 'no-store' });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail || `导出失败（${response.status}）`);

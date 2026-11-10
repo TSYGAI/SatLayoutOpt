@@ -1,11 +1,13 @@
 """
-文件说明：读取统一 TOML 的运行及算法参数；模型六向包络增量由独立模型设置提供。
-本模块只处理配置解析，不包含模型业务逻辑或环境密钥。
+文件说明：读取统一 TOML 的运行及算法参数和新模型默认分辨率；模型六向增量与分辨率覆盖值由独立模型设置提供。
+本模块只处理配置解析与安装筒基座预载尺寸，不包含模型业务逻辑或环境密钥。
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 import tomllib
+
+from app.core.paths import runtime_config_path
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class RuntimeConfig:
     model_preview_interaction_angular_degrees: float
     model_preview_interaction_max_angular_degrees: float
     model_preview_interaction_triangle_target: int
+    model_preview_interaction_fast_enabled: bool
     model_preview_shell_samples_per_face: int
     model_preview_shell_ray_epsilon_ratio: float
     model_preview_artifact_version: int
@@ -40,12 +43,24 @@ class RuntimeConfig:
     model_envelope_step_min_linear_tolerance_mm: float
     model_envelope_step_angular_degrees: float
     model_envelope_refinement_grid_size: int
+    model_envelope_refinement_grid_min: int
     model_envelope_refinement_direction_count: int
     model_envelope_connectivity_core_inset_ratio: float
     model_envelope_detail_smoothing_ratio: float
     model_envelope_outline_simplify_ratio: float
     model_envelope_gap_bridge_ratio: float
     model_envelope_artifact_version: int
+    model_envelope_failure_log_dir: str
+    model_envelope_gap_bridge_limit_mm: float
+    model_envelope_voxel_max_cells: int
+    model_envelope_surface_batch_cells: int
+    model_envelope_scratch_dir: str
+    model_envelope_scratch_reserve_bytes: int
+    model_envelope_raster_triangle_batch: int
+    model_envelope_raster_batch_cells: int
+    model_envelope_workspace_memory_bytes: int
+    model_envelope_process_memory_limit_bytes: int
+    model_envelope_memory_reserve_bytes: int
     model_store_dir: str
     model_store_database_name: str
     model_store_max_variants: int
@@ -60,6 +75,8 @@ class RuntimeConfig:
     cylinder_radial_segments: int
     default_cylinder_radius_mm: float
     default_cylinder_height_mm: float
+    default_installation_base_lower_radius_mm: float
+    default_installation_base_height_mm: float
     min_axis_radius_mm: float
     default_axis_radius_mm: float
     min_fairing_shell_radius_mm: float
@@ -73,10 +90,19 @@ def _read_toml(path: Path) -> dict:
         return tomllib.load(config_file)
 
 
-def load_runtime_config() -> RuntimeConfig:
-    """加载并约束项目根目录中的统一运行时配置。"""
+def _read_bool(values: dict, key: str, default: bool) -> bool:
+    """严格读取布尔配置，避免把字符串误当成开启状态。"""
 
-    config_path = Path(__file__).resolve().parents[3] / "config" / "sat_layout_opt.toml"
+    value = values.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"配置项 {key} 必须是 TOML 布尔值")
+    return value
+
+
+def load_runtime_config() -> RuntimeConfig:
+    """加载并约束统一运行时配置；默认分辨率必须来自 TOML，必需配置缺失时抛出 KeyError。"""
+
+    config_path = runtime_config_path()
     values = _read_toml(config_path)
     backend = values["backend"]
     frontend = values["frontend"]
@@ -95,6 +121,7 @@ def load_runtime_config() -> RuntimeConfig:
         model_preview_interaction_angular_degrees=max(float(backend.get("model_preview_interaction_angular_degrees", 20.0)), 0.1),
         model_preview_interaction_max_angular_degrees=max(float(backend.get("model_preview_interaction_max_angular_degrees", 30.0)), 0.1),
         model_preview_interaction_triangle_target=max(int(backend.get("model_preview_interaction_triangle_target", 250000)), 1),
+        model_preview_interaction_fast_enabled=_read_bool(backend, "model_preview_interaction_fast_enabled", True),
         model_preview_shell_samples_per_face=max(int(backend.get("model_preview_shell_samples_per_face", 9)), 1),
         model_preview_shell_ray_epsilon_ratio=max(float(backend.get("model_preview_shell_ray_epsilon_ratio", 1e-7)), 1e-12),
         model_preview_artifact_version=max(int(backend.get("model_preview_artifact_version", 1)), 1),
@@ -109,13 +136,25 @@ def load_runtime_config() -> RuntimeConfig:
         model_envelope_step_linear_ratio=max(float(backend.get("model_envelope_step_linear_ratio", 1.0 / 450.0)), 1e-8),
         model_envelope_step_min_linear_tolerance_mm=max(float(backend.get("model_envelope_step_min_linear_tolerance_mm", 0.5)), 1e-8),
         model_envelope_step_angular_degrees=max(float(backend.get("model_envelope_step_angular_degrees", 14.32394487827058)), 0.1),
-        model_envelope_refinement_grid_size=max(int(backend.get("model_envelope_refinement_grid_size", 384)), 32),
+        model_envelope_refinement_grid_size=max(int(backend["model_envelope_refinement_grid_size"]), 32),
+        model_envelope_refinement_grid_min=max(int(backend["model_envelope_refinement_grid_min"]), 32),
         model_envelope_refinement_direction_count=min(max(int(backend.get("model_envelope_refinement_direction_count", 20)), 2), 64),
         model_envelope_connectivity_core_inset_ratio=min(max(float(backend.get("model_envelope_connectivity_core_inset_ratio", 0.12)), 0.0), 0.5),
         model_envelope_detail_smoothing_ratio=max(float(backend.get("model_envelope_detail_smoothing_ratio", 0.008)), 0.0),
         model_envelope_outline_simplify_ratio=max(float(backend.get("model_envelope_outline_simplify_ratio", 0.004)), 0.0),
         model_envelope_gap_bridge_ratio=max(float(backend.get("model_envelope_gap_bridge_ratio", 0.06)), 0.0),
-        model_envelope_artifact_version=max(int(backend.get("model_envelope_artifact_version", 9)), 1),
+        model_envelope_artifact_version=max(int(backend.get("model_envelope_artifact_version", 11)), 1),
+        model_envelope_failure_log_dir=str(backend.get("model_envelope_failure_log_dir", "data/logs/envelope")),
+        model_envelope_gap_bridge_limit_mm=max(float(backend["model_envelope_gap_bridge_limit_mm"]), 0.0),
+        model_envelope_voxel_max_cells=max(int(backend["model_envelope_voxel_max_cells"]), 1),
+        model_envelope_surface_batch_cells=max(int(backend["model_envelope_surface_batch_cells"]), 125),
+        model_envelope_scratch_dir=str(backend["model_envelope_scratch_dir"]),
+        model_envelope_scratch_reserve_bytes=max(int(backend["model_envelope_scratch_reserve_bytes"]), 0),
+        model_envelope_raster_triangle_batch=max(int(backend["model_envelope_raster_triangle_batch"]), 1),
+        model_envelope_raster_batch_cells=max(int(backend["model_envelope_raster_batch_cells"]), 1),
+        model_envelope_workspace_memory_bytes=max(int(backend["model_envelope_workspace_memory_bytes"]), 1),
+        model_envelope_process_memory_limit_bytes=max(int(backend["model_envelope_process_memory_limit_bytes"]), 1),
+        model_envelope_memory_reserve_bytes=max(int(backend["model_envelope_memory_reserve_bytes"]), 1),
         model_store_dir=str(backend.get("model_store_dir", "data/store")),
         model_store_database_name=str(backend.get("model_store_database_name", "sat_layout_opt.sqlite3")),
         model_store_max_variants=max(int(backend.get("model_store_max_variants", 1)), 1),
@@ -139,6 +178,8 @@ def load_runtime_config() -> RuntimeConfig:
             max(float(pre_config.get("min_fairing_shell_radius_mm", 0.001)), 1e-9),
         ),
         default_cylinder_height_mm=max(float(backend.get("default_cylinder_height_mm", 3600.0)), 1e-9),
+        default_installation_base_lower_radius_mm=float(pre_config["default_installation_base_lower_radius_mm"]),
+        default_installation_base_height_mm=float(pre_config["default_installation_base_height_mm"]),
     )
 
 

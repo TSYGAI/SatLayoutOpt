@@ -1,0 +1,133 @@
+/** 文件说明：原始方案与微调版本共用的数量控件和筛选浮窗样式，统一数量框与筛选入口的边框、圆角和高度；默认顺序独占一行，尺寸控件并排，兼容深浅主题、键盘与窄屏。 */
+
+.layout-candidate-toolbar,
+.layout-candidate-filter-popover {
+  --candidate-bg: #0c1620;
+  --candidate-text: #dbe8f1;
+  --candidate-muted: #8da2b6;
+  --candidate-border: #29404f;
+  --candidate-surface: #101b26;
+  --candidate-hover: #1a3242;
+  --candidate-accent: #39d0e9;
+  --candidate-selected-bg: #12303d;
+  --candidate-selected-border: #39768b;
+  --candidate-button-text: #062c38;
+  --candidate-shadow: #00000055;
+}
+
+:root[data-theme="light"] .layout-candidate-toolbar,
+:root[data-theme="light"] .layout-candidate-filter-popover {
+  --candidate-bg: #ffffff;
+  --candidate-text: #263f54;
+  --candidate-muted: #6b8294;
+  --candidate-border: #dbe5ec;
+  --candidate-surface: #f7fafc;
+  --candidate-hover: #edf4f8;
+  --candidate-accent: #0f7d99;
+  --candidate-selected-bg: #eff8fb;
+  --candidate-selected-border: #8bbfce;
+  --candidate-button-text: #ffffff;
+  --candidate-shadow: #193b541c;
+}
+
+.layout-candidate-toolbar { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.layout-candidate-toolbar > label { min-width: 0; line-height: 20px; }
+.layout-candidate-tools { display: flex; align-items: center; gap: 8px; }
+.layout-candidate-toolbar input.layout-candidate-count-input,
+.layout-candidate-toolbar .layout-candidate-filter-trigger {
+  box-sizing: border-box;
+  height: 20px;
+  border: 1px solid var(--candidate-border);
+  border-radius: 5px;
+  background: var(--candidate-surface);
+}
+/* 数量框不继承浅色表单的另一套边框颜色，两组工具栏均沿用数量框原有的清晰边界。 */
+:root[data-theme="light"] .layout-candidate-toolbar { --candidate-border: #b4c5d2; }
+:root[data-theme="light"] .layout-candidate-toolbar input.layout-candidate-count-input { border-color: var(--candidate-border); }
+.layout-candidate-toolbar input.layout-candidate-count-input {
+  appearance: textfield;
+  width: 58px;
+  min-width: 0;
+  padding: 0 5px;
+  color: var(--candidate-muted);
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.layout-candidate-count-input::-webkit-inner-spin-button { appearance: none; }
+.layout-candidate-toolbar input.layout-candidate-count-input:focus { border-color: var(--candidate-border); box-shadow: none; }
+.layout-candidate-toolbar input.layout-candidate-count-input:focus-visible,
+.layout-candidate-filter-trigger:focus-visible { outline: 1px solid var(--candidate-accent); outline-offset: 2px; }
+.layout-candidate-filter-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+  color: var(--candidate-muted);
+  cursor: pointer;
+}
+.layout-candidate-filter-trigger > svg { width: 12px; height: 12px; stroke-width: 1.6; }
+.layout-candidate-filter-trigger[aria-expanded="true"],
+.layout-candidate-filter-trigger[data-active="true"] { border-color: var(--candidate-selected-border); color: var(--candidate-accent); background: var(--candidate-selected-bg); }
+.layout-candidate-filter-trigger[data-active="true"]::after { position: absolute; top: -2px; right: -2px; width: 4px; height: 4px; border: 1px solid var(--candidate-bg); border-radius: 50%; background: var(--candidate-accent); content: ""; }
+.layout-candidate-toolbar .layout-candidate-filter-trigger:hover { background: var(--candidate-hover); }
+
+.layout-candidate-filter-popover {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
+  border: 1px solid var(--candidate-border);
+  border-radius: 9px;
+  color: var(--candidate-text);
+  background: var(--candidate-bg);
+  box-shadow: 0 8px 28px var(--candidate-shadow), 0 2px 6px var(--candidate-shadow);
+  font: 11px/1.5 "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+.layout-candidate-filter-popover button { appearance: none; margin: 0; color: inherit; font: inherit; cursor: pointer; }
+.layout-candidate-filter-popover button:focus-visible,
+.layout-candidate-filter-popover input:focus-visible { outline: 1px solid var(--candidate-accent); outline-offset: 2px; }
+.layout-candidate-filter-popover header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.layout-candidate-filter-popover h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.layout-candidate-filter-popover .layout-candidate-filter-close { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; color: var(--candidate-muted); background: transparent; }
+.layout-candidate-filter-close > svg { width: 12px; height: 12px; stroke-width: 1.6; }
+.layout-candidate-filter-close:hover { background: var(--candidate-hover); }
+.layout-candidate-filter-heading { display: flex; justify-content: space-between; gap: 4px; margin-bottom: 8px; }
+.layout-candidate-filter-heading > span { font-weight: 500; }
+.layout-candidate-filter-heading > small { color: var(--candidate-muted); font-size: 10px; }
+.layout-candidate-sort-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.layout-candidate-sort-button { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; height: 30px; padding: 0 6px; border: 1px solid var(--candidate-border); border-radius: 6px; background: var(--candidate-surface); white-space: nowrap; }
+.layout-candidate-sort-button[data-sort="score"], .layout-candidate-sort-button[data-sort="saved"] { grid-column: 1 / -1; }
+.layout-candidate-filter-popover .layout-candidate-sort-button[aria-pressed="true"] { border-color: var(--candidate-selected-border); color: var(--candidate-accent); background: var(--candidate-selected-bg); }
+.layout-candidate-sort-direction { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 3px; font-size: 10px; }
+.layout-candidate-sort-direction > svg { width: 10px; height: 10px; stroke-width: 1.7; }
+.layout-candidate-range { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--candidate-border); }
+.layout-candidate-range-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.layout-candidate-range-row { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; min-width: 0; gap: 4px; align-items: center; }
+.layout-candidate-range-row > label { color: var(--candidate-muted); white-space: nowrap; }
+.layout-candidate-range-row > span { color: var(--candidate-muted); font-size: 10px; white-space: nowrap; }
+.layout-candidate-range-row input { appearance: textfield; box-sizing: border-box; width: 100%; min-width: 0; height: 26px; padding: 0 5px; border: 1px solid var(--candidate-border); border-radius: 5px; color: var(--candidate-text); background: var(--candidate-surface); font: inherit; text-align: center; font-variant-numeric: tabular-nums; }
+.layout-candidate-range-row input::-webkit-inner-spin-button { appearance: none; }
+.layout-candidate-range-row input::placeholder { color: var(--candidate-muted); }
+.layout-candidate-filter-error { margin: 8px 0 0; color: #ff9ba3; }
+:root[data-theme="light"] .layout-candidate-filter-error { color: #b63d47; }
+.layout-candidate-filter-popover footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.layout-candidate-filter-popover footer > span { color: var(--candidate-muted); font-size: 10px; }
+.layout-candidate-filter-popover footer > div { display: flex; gap: 8px; }
+.layout-candidate-filter-popover footer button { height: 27px; padding: 0 12px; border: 1px solid var(--candidate-border); border-radius: 5px; background: var(--candidate-surface); }
+.layout-candidate-filter-popover footer .layout-candidate-filter-apply { border-color: var(--candidate-accent); color: var(--candidate-button-text); background: var(--candidate-accent); }
+.layout-candidate-filter-summary { margin: 0; color: #39d0e9; font-size: 10px; }
+:root[data-theme="light"] .layout-candidate-filter-summary { color: #0f7d99; }
+
+@media (max-width: 360px) {
+  .layout-candidate-toolbar { gap: 6px; }
+  .layout-candidate-filter-popover { padding: 12px; }
+  .layout-candidate-filter-heading > small { font-size: 9px; }
+}

@@ -1,6 +1,6 @@
 /**
- * 文件说明：前置配置页的 API 客户端，封装卫星数量与自定义整流舱段的读取、保存与构建请求。
- * 复用模型 API 的统一配置读取与错误转换，页面层不直接拼接后端地址；前置配置页不提供构件下载。
+ * 文件说明：前置配置 API 客户端，封装卫星数量、软硬对称和整流舱段的读取、保存与构建请求。
+ * 复用模型 API 的统一配置读取与错误转换；形态设置按统一请求对象提交，不维护旧位置参数或重复组装轮廓。
  */
 
 import { requestJson } from './model-upload-api.js';
@@ -26,35 +26,31 @@ export async function saveSatelliteCount(recordId, value, signal) {
 }
 
 /**
- * 保存整流舱段尺寸区间、中轴半径与整流罩半径，并按区间最小值构建 B-Rep 构件。
- * @param {number} minRadiusMm 圆柱段底面半径最小值，单位为毫米。
- * @param {number} maxRadiusMm 圆柱段底面半径最大值，单位为毫米。
- * @param {number} minHeightMm 圆柱段高度最小值，单位为毫米。
- * @param {number} maxHeightMm 圆柱段高度最大值，单位为毫米。
- * @param {number} axisRadiusMm 中轴（中心杆）半径，单位为毫米。
- * @param {number} fairingRadiusMm 整流罩半径，单位为毫米。
+ * 保存整流罩外形与独立安装筒设置；共通半径、段序列和外形边界由服务端统一派生。
+ * @param {object} payload 已校验的形态与安装筒请求体。
  * @param {AbortSignal} [signal] 可选的取消信号。
  */
-export async function saveCustomFairingSegment(
-  minRadiusMm,
-  maxRadiusMm,
-  minHeightMm,
-  maxHeightMm,
-  axisRadiusMm,
-  fairingRadiusMm,
-  signal,
-) {
+export async function saveCustomFairingSegment(payload, signal) {
   return requestJson('/api/pre-config/fairing-segment', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      min_radius_mm: minRadiusMm,
-      max_radius_mm: maxRadiusMm,
-      min_height_mm: minHeightMm,
-      max_height_mm: maxHeightMm,
-      axis_radius_mm: axisRadiusMm,
-      fairing_radius_mm: fairingRadiusMm,
-    }),
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+/**
+ * 保存某类卫星的对称开关和模式，返回服务端确认的卫星配置；失败交由调用方展示。
+ * @param {string} recordId 固化模型标识。
+ * @param {boolean} enabled 是否启用两两对称。
+ * @param {'hard'|'soft'} mode 硬约束或软约束。
+ * @param {AbortSignal} [signal] 可选取消信号。
+ */
+export async function saveSatelliteSymmetry(recordId, enabled, mode, signal) {
+  return requestJson('/api/pre-config/satellite-symmetry', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ record_id: recordId, enabled, mode }),
     signal,
   });
 }

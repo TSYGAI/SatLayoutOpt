@@ -1,24 +1,35 @@
 """
-文件说明：按六向包络增量放大模型，并在全局凸包上执行受限的全方位局部轮廓修正。
-本模块只输出单体水密外表面；STEP 读取、姿态归一化和产物发布由模型包络服务负责。
+文件说明：校验包络参数，调用三维外部占据重建并物化唯一零度包络。
+允许真实分离的水密外部构件；STEP 读取、归一化、资源隔离和发布由服务负责。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 import numpy as np
 from shapely import polygons as shapely_polygons, union_all
-from shapely.errors import GEOSException
+from shapely.affinity import translate
 from shapely.geometry import Polygon
 import trimesh
 
 
-ENVELOPE_ALGORITHM = "axis_scaled_azimuthal_profile_outer_hull_v5"
-ENVELOPE_PREVIEW_ALGORITHM = "axis_scaled_azimuthal_profile_outer_hull_preview_v5"
+ENVELOPE_ALGORITHM = "exterior_occupancy_directional_sweep_v9"
+ENVELOPE_PREVIEW_ALGORITHM = "exterior_occupancy_directional_sweep_preview_v9"
 STORED_ENVELOPE_ROTATIONS = (0,)
 _GEOMETRY_EPSILON = 1e-8
+
+
+class EnvelopeGenerationError(ValueError):
+    """描述严格精细包络失败的阶段和每次重试结果，不允许退回凸包。"""
+
+    def __init__(self, message: str, *, stage: str, attempts: list[dict] | None = None) -> None:
+        """保存失败阶段和诊断记录，供隔离计算入口生成独立报告。"""
+        super().__init__(message)
+        self.stage = stage
+        self.attempts = list(attempts or [])
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,14 @@ class EnvelopeParameters:
     detail_smoothing_ratio: float = 0.008
     outline_simplify_ratio: float = 0.004
     gap_bridge_ratio: float = 0.06
+    gap_bridge_limit_mm: float = 3.0
+    voxel_max_cells: int = 8388608
+    surface_batch_cells: int = 262144
+    raster_triangle_batch: int = 4096
+    raster_batch_cells: int = 131072
+    workspace_memory_bytes: int = 268435456
+    process_memory_limit_bytes: int = 3221225472
+    memory_reserve_bytes: int = 4294967296
 
 
 @dataclass(frozen=True)
@@ -50,22 +69,22 @@ class EnvelopeVariant:
     vertex_count: int
     triangle_count: int
     watertight: bool
+    quality: dict
 
 
 def generate_envelope_variants(
     mesh: trimesh.Trimesh,
     output_dir: Path,
     parameters: EnvelopeParameters,
-    source_is_outer_hull: bool = False,
+    source_is_envelope: bool = False,
 ) -> list[EnvelopeVariant]:
-    """生成唯一的 0 度基础包络；同算法旧外壳可直接仿射复用。"""
+    """生成唯一的 0 度基础包络；仅参数完全相同的有效旧包络可原样复用。"""
 
-    scaled = _axis_scaled_source_mesh(mesh, parameters)
-    if source_is_outer_hull:
-        _validate_outer_surface(scaled)
-        base = scaled
+    if source_is_envelope:
+        _validate_outer_surface(mesh)
+        base = mesh
     else:
-        base = _locally_refined_outer_surface(scaled, parameters)
+        base = _locally_refined_outer_surface(mesh, parameters)
     output_dir.mkdir(parents=True, exist_ok=False)
     variants: list[EnvelopeVariant] = []
     for rot_z in STORED_ENVELOPE_ROTATIONS:
@@ -83,6 +102,8 @@ def generate_envelope_variants(
             preview_faces=faces,
             envelope_algorithm=np.asarray(ENVELOPE_ALGORITHM),
             preview_algorithm=np.asarray(ENVELOPE_PREVIEW_ALGORITHM),
+            envelope_quality=np.asarray(json.dumps(base.metadata.get("envelope_quality", {}), ensure_ascii=False)),
+            source_transform=np.asarray(mesh.metadata.get("source_transform", np.eye(4)), dtype=np.float64),
         )
         bounds = np.asarray(envelope.bounds, dtype=float)
         variants.append(EnvelopeVariant(
@@ -93,24 +114,21 @@ def generate_envelope_variants(
             vertex_count=len(vertices),
             triangle_count=len(faces),
             watertight=bool(envelope.is_watertight),
+            quality=dict(base.metadata.get("envelope_quality", {})),
         ))
     return variants
 
 
-def _axis_scaled_source_mesh(
+def _directional_clearance_bounds(
     mesh: trimesh.Trimesh,
     parameters: EnvelopeParameters,
-) -> trimesh.Trimesh:
-    """把源包围盒映射到六向扩张后的边界，同时原样保留网格拓扑和面顺序。
-
-    每个轴独立缩放。相对两侧距离不相等时，目标包围盒中心随之偏移，因此允许生成
-    非对称包络；所有源顶点仍通过同一个轴向仿射映射得到一一对应的包络顶点。
-    """
+) -> tuple[np.ndarray, np.ndarray]:
+    """校验源三角网格和六向增量，返回各轴负向与正向扩张距离；非法输入抛出 ValueError。"""
 
     if mesh.is_empty or len(mesh.vertices) == 0 or len(mesh.faces) == 0:
         raise ValueError("模型没有可用于生成包络的三角面")
     vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    faces = np.asarray(mesh.faces, dtype=np.int64)
+    faces = np.asarray(mesh.faces)
     if (
         vertices.ndim != 2
         or vertices.shape[1] != 3
@@ -142,26 +160,18 @@ def _axis_scaled_source_mesh(
     source_extent = source_upper - source_lower
     if np.any(source_extent <= _GEOMETRY_EPSILON):
         raise ValueError("无法从平面或线性模型生成三维包络")
-    target_lower = source_lower - negative
-    target_upper = source_upper + positive
-    scale = (target_upper - target_lower) / source_extent
-    scaled_vertices = target_lower + (vertices - source_lower) * scale
-    return trimesh.Trimesh(
-        vertices=scaled_vertices,
-        faces=faces.copy(),
-        process=False,
-    )
+    return negative, positive
 
 
 def _outer_convex_surface(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """用全部放大顶点重建单一闭合凸外壳，彻底移除内部零件、孔洞和内侧面片。
+    """用全部源顶点重建单一闭合凸外壳，移除内部零件、孔洞和内侧面片。
 
     返回值只描述最外层包络，不保留源三角面的数量或索引；各轴极值点仍属于凸包，
     因而六向增量确定的目标包围盒不会改变。
     """
 
     if mesh.is_empty or len(mesh.vertices) < 4:
-        raise ValueError("放大后的模型没有足够顶点用于重建外层包络")
+        raise ValueError("源模型没有足够顶点用于重建外层包络")
     source_bounds = np.asarray(mesh.bounds, dtype=np.float64)
     try:
         outer = trimesh.convex.convex_hull(np.asarray(mesh.vertices, dtype=np.float64))
@@ -178,44 +188,51 @@ def _locally_refined_outer_surface(
     mesh: trimesh.Trimesh,
     parameters: EnvelopeParameters,
 ) -> trimesh.Trimesh:
-    """在全局凸包内按绕 Z 轴均布的竖向投影重建主要外轮廓，并保留原六向边界。
+    """使用有界三维占据区域重建精细外部包络，失败即报错，不返回凸包。"""
 
-    每个方位使用去孔后的真实最外轮廓，经向外平滑和简化忽略小凸起，再封连窄缝；深层凸包核心
-    只负责连接主体，不再覆盖圆筒、支架和底座间的大尺度收缩。顶视 XY 轮廓不参与
-    切削。任一投影或布尔运算无法形成可靠单体时返回原全局凸包。
-    """
+    from app.domain.envelope_voxel import build_outer_voxel_envelope
+    from app.domain.envelope_resources import envelope_stage
 
-    _validate_refinement_parameters(parameters)
-    global_hull = _outer_convex_surface(mesh)
     try:
-        vertices = np.asarray(mesh.vertices, dtype=np.float64)
-        directions = _refinement_directions(parameters.refinement_direction_count)
-        prisms = []
-        for direction in directions:
-            outline = _locally_refined_projection(mesh, direction, parameters)
-            outline_hull_area = float(outline.convex_hull.area)
-            if outline_hull_area - float(outline.area) <= outline_hull_area * 1e-8:
-                continue
-            prisms.append(_extrude_projection_prism(outline, direction, vertices))
-        if not prisms:
-            return global_hull
-        refined = trimesh.boolean.intersection(
-            [global_hull, *prisms],
-            engine="manifold",
-            check_volume=True,
-        )
-        if not isinstance(refined, trimesh.Trimesh):
-            return global_hull
-        refined = _remove_negligible_components(
-            refined,
-            np.asarray(global_hull.bounds, dtype=np.float64),
-        )
+        with envelope_stage("parameter_validation"):
+            _validate_refinement_parameters(parameters)
+            negative, positive = _directional_clearance_bounds(mesh, parameters)
+        refined = build_outer_voxel_envelope(mesh, negative, positive, parameters)
         _validate_outer_surface(refined)
-        restored = _restore_mesh_bounds(refined, np.asarray(global_hull.bounds, dtype=np.float64))
-        _validate_outer_surface(restored)
-        return restored
-    except (GEOSException, RuntimeError, TypeError, ValueError):
-        return global_hull
+        return refined
+    except Exception as error:
+        raise EnvelopeGenerationError(
+            f"精细包络生成失败；已拒绝使用凸包替代结果：{error}",
+            stage=getattr(error, "envelope_stage", "exterior_occupancy_reconstruction"),
+            attempts=[{"error_type": type(error).__name__, "error": str(error)}],
+        ) from error
+
+
+def _sweep_outline_axis(outline: Polygon, axis: int, lower: float, upper: float) -> Polygon:
+    """沿二维轴连续扫掠去孔轮廓，返回两端轮廓与边界连接带的并集；失败时抛出 ValueError。"""
+
+    if upper - lower <= _GEOMETRY_EPSILON:
+        return translate(outline, xoff=lower if axis == 0 else 0.0,
+                         yoff=lower if axis == 1 else 0.0)
+    start, end = np.zeros(2), np.zeros(2)
+    start[axis], end[axis] = lower, upper
+    points = np.asarray(outline.exterior.coords, dtype=np.float64)
+    first, second = points[:-1], points[1:]
+    # 与扫掠方向平行的边退化为线，不应提交给多边形布尔运算。
+    keep = np.abs(second[:, 1 - axis] - first[:, 1 - axis]) > _GEOMETRY_EPSILON
+    strips = np.stack((first[keep] + start, second[keep] + start,
+                       second[keep] + end, first[keep] + end), axis=1)
+    parts = [translate(outline, xoff=start[0], yoff=start[1]),
+             translate(outline, xoff=end[0], yoff=end[1])]
+    parts.extend(shapely_polygons(strips))
+    expanded = union_all(parts).buffer(0)
+    # 边界连接带的并集会留下近重合/近共线点；拉伸前去除数值噪声，避免退回粗凸包。
+    bounds = expanded.bounds
+    tolerance = min(bounds[2] - bounds[0], bounds[3] - bounds[1]) * _GEOMETRY_EPSILON
+    expanded = expanded.simplify(tolerance, preserve_topology=True)
+    if not isinstance(expanded, Polygon) or expanded.is_empty or not expanded.is_valid:
+        raise ValueError("六向增量扫掠未形成有效连续轮廓")
+    return Polygon(expanded.exterior)
 
 
 def _validate_refinement_parameters(parameters: EnvelopeParameters) -> None:
@@ -235,69 +252,19 @@ def _validate_refinement_parameters(parameters: EnvelopeParameters) -> None:
         raise ValueError("局部包络比例必须是非负有限数值")
     if parameters.connectivity_core_inset_ratio > 0.5:
         raise ValueError("局部包络连接核心内缩比例不能大于 0.5")
-
-
-def _refinement_directions(direction_count: int) -> tuple[np.ndarray, ...]:
-    """返回半圆内均匀分布的水平投影方向；相反方向表示同一个竖向投影平面。"""
-
-    return tuple(
-        np.asarray([np.cos(angle), np.sin(angle)], dtype=np.float64)
-        for angle in np.linspace(0.0, np.pi, direction_count, endpoint=False)
-    )
-
-
-def _locally_refined_projection(
-    mesh: trimesh.Trimesh,
-    horizontal_direction: np.ndarray,
-    parameters: EnvelopeParameters,
-) -> Polygon:
-    """返回平滑且封连窄槽的二维外边界；宽凹陷保留，闭运算不得削掉已有轮廓。"""
-
-    projected = _quantized_projection_union(
-        mesh,
-        horizontal_direction,
-        parameters.refinement_grid_size,
-    )
-    hull = projected.convex_hull
-    if not isinstance(hull, Polygon) or hull.is_empty or hull.area <= _GEOMETRY_EPSILON:
-        raise ValueError("模型侧投影无法形成有效外轮廓")
-    min_x, min_y, max_x, max_y = hull.bounds
-    short_span = min(max_x - min_x, max_y - min_y)
-    if short_span <= _GEOMETRY_EPSILON:
-        raise ValueError("模型侧投影缺少二维跨度")
-
-    inset = parameters.connectivity_core_inset_ratio * short_span
-    smoothing = parameters.detail_smoothing_ratio * short_span
-    simplify = parameters.outline_simplify_ratio * short_span
-    core = hull.buffer(-inset, join_style="mitre") if inset > 0.0 else hull
-    if core.is_empty:
-        return hull
-    if not isinstance(projected, Polygon):
-        return hull
-    detail = Polygon(projected.exterior).buffer(smoothing, quad_segs=2)
-    if simplify > 0.0:
-        detail = detail.simplify(simplify, preserve_topology=True).buffer(simplify, quad_segs=2)
-    bridge_radius = parameters.gap_bridge_ratio * short_span * 0.5
-    if bridge_radius > 0.0:
-        closed = detail.buffer(bridge_radius, quad_segs=4).buffer(-bridge_radius, quad_segs=4)
-        # 闭运算按槽宽连接，即使窄槽很深也能封住；并回原轮廓以抵消离散圆弧的收缩误差。
-        detail = union_all((detail, closed))
-    refined = union_all((core, detail)).intersection(hull).buffer(0)
-    # 清理闭运算并集产生的近重合点，避免拉伸后出现零面积侧面；容差仅用于数值去噪。
-    refined = refined.simplify(short_span * _GEOMETRY_EPSILON, preserve_topology=True)
-    if not isinstance(refined, Polygon) or refined.is_empty or refined.area <= _GEOMETRY_EPSILON:
-        return hull
-    outer = Polygon(refined.exterior)
-    if not outer.is_valid or outer.area <= _GEOMETRY_EPSILON:
-        return hull
-    return outer
+    if not np.isfinite(parameters.gap_bridge_limit_mm) or parameters.gap_bridge_limit_mm < 0:
+        raise ValueError("包络封缝毫米上限必须为非负有限数值")
+    for name in ("voxel_max_cells", "raster_triangle_batch", "raster_batch_cells", "workspace_memory_bytes", "process_memory_limit_bytes", "memory_reserve_bytes"):
+        value = getattr(parameters, name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"包络资源参数 {name} 必须为正整数")
 
 
 def _remove_negligible_components(
     mesh: trimesh.Trimesh,
     target_bounds: np.ndarray,
 ) -> trimesh.Trimesh:
-    """清除布尔交产生的极小孤立数值碎片；真实分离实体或边界变化会触发回退。"""
+    """清除布尔交产生的极小孤立数值碎片；真实分离实体或边界变化会明确报错。"""
 
     if mesh.body_count == 1:
         return mesh
@@ -319,55 +286,6 @@ def _remove_negligible_components(
     ):
         raise ValueError("局部包络产生了不可忽略的分离实体")
     return main
-
-
-def _quantized_projection_union(
-    mesh: trimesh.Trimesh,
-    horizontal_direction: np.ndarray,
-    grid_size: int,
-):
-    """把任意水平视向与 Z 组成侧投影，并在固定网格上合并重复三角形。"""
-
-    direction = np.asarray(horizontal_direction, dtype=np.float64)
-    if direction.shape != (2,) or not np.all(np.isfinite(direction)):
-        raise ValueError("水平投影方向必须是二维有限向量")
-    norm = float(np.linalg.norm(direction))
-    if norm <= _GEOMETRY_EPSILON:
-        raise ValueError("水平投影方向不能为零向量")
-    direction = direction / norm
-    source_vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    vertices = np.column_stack((source_vertices[:, :2] @ direction, source_vertices[:, 2]))
-    faces = np.asarray(mesh.faces, dtype=np.int64)
-    lower = vertices.min(axis=0)
-    upper = vertices.max(axis=0)
-    span = upper - lower
-    if np.any(span <= _GEOMETRY_EPSILON):
-        raise ValueError("模型侧投影缺少有效跨度")
-    step = span / float(grid_size - 1)
-    quantized = np.rint((vertices - lower) / step).astype(np.int32)
-    point_codes = quantized[:, 0] * grid_size + quantized[:, 1]
-    triangle_codes = np.sort(point_codes[faces], axis=1)
-    triangle_codes = triangle_codes[
-        (triangle_codes[:, 0] != triangle_codes[:, 1])
-        & (triangle_codes[:, 1] != triangle_codes[:, 2])
-    ]
-    if len(triangle_codes) == 0:
-        raise ValueError("模型侧投影没有有效三角形")
-    triangle_codes = np.unique(triangle_codes, axis=0)
-    grid_points = np.empty((len(triangle_codes), 3, 2), dtype=np.int64)
-    grid_points[:, :, 0] = triangle_codes // grid_size
-    grid_points[:, :, 1] = triangle_codes % grid_size
-    first = grid_points[:, 1] - grid_points[:, 0]
-    second = grid_points[:, 2] - grid_points[:, 0]
-    non_collinear = first[:, 0] * second[:, 1] != first[:, 1] * second[:, 0]
-    grid_points = grid_points[non_collinear]
-    if len(grid_points) == 0:
-        raise ValueError("模型侧投影三角形全部退化")
-    coordinates = lower + grid_points.astype(np.float64) * step
-    projected = union_all(shapely_polygons(coordinates)).buffer(0)
-    if projected.is_empty or projected.area <= _GEOMETRY_EPSILON:
-        raise ValueError("模型侧投影合并后为空")
-    return projected
 
 
 def _extrude_projection_prism(
@@ -407,33 +325,14 @@ def _extrude_projection_prism(
     return prism
 
 
-def _restore_mesh_bounds(mesh: trimesh.Trimesh, target_bounds: np.ndarray) -> trimesh.Trimesh:
-    """通过极小轴向仿射校正恢复量化或布尔运算前的精确六向边界。"""
-
-    source_bounds = np.asarray(mesh.bounds, dtype=np.float64)
-    source_extent = source_bounds[1] - source_bounds[0]
-    target_extent = target_bounds[1] - target_bounds[0]
-    if np.any(source_extent <= _GEOMETRY_EPSILON) or np.any(target_extent <= _GEOMETRY_EPSILON):
-        raise ValueError("局部包络无法恢复六向边界")
-    vertices = target_bounds[0] + (
-        (np.asarray(mesh.vertices, dtype=np.float64) - source_bounds[0])
-        * (target_extent / source_extent)
-    )
-    return trimesh.Trimesh(
-        vertices=vertices,
-        faces=np.asarray(mesh.faces, dtype=np.int64),
-        process=False,
-    )
-
-
 def _validate_outer_surface(mesh: trimesh.Trimesh) -> None:
-    """确认候选包络是顶点有限、绕序一致的单一水密三角外壳。"""
+    """确认候选包络顶点有限、绕序一致且水密，允许真实分离的外部构件。"""
 
     if (
         mesh.is_empty
         or len(mesh.vertices) < 4
         or len(mesh.faces) < 4
-        or mesh.body_count != 1
+        or mesh.body_count < 1
         or not mesh.is_watertight
         or not mesh.is_winding_consistent
         or not np.all(np.isfinite(mesh.vertices))

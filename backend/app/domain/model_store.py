@@ -17,6 +17,7 @@ from typing import Iterable
 from uuid import uuid4
 
 from app.core.config import runtime_config
+from app.core.paths import data_root
 
 
 SCHEMA_VERSION = 1
@@ -85,7 +86,7 @@ class ModelStore:
             创建固化目录、资源子目录和 SQLite 数据库文件。
         """
 
-        project_root = Path(__file__).resolve().parents[3]
+        project_root = data_root()
         self.store_dir = Path(store_dir or (project_root / runtime_config.model_store_dir))
         self.asset_dir = self.store_dir / "assets"
         self.database_path = self.store_dir / (database_name or runtime_config.model_store_database_name)

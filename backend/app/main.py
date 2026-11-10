@@ -1,5 +1,5 @@
 """
-文件说明：SatLayoutOpt FastAPI 入口，配置跨域、模型数据、前置配置及布局优化任务路由。
+文件说明：SatLayoutOpt FastAPI 入口，配置跨域及下载文件名响应头、模型数据、前置配置及布局优化任务路由。
 应用关闭时调用模型服务的统一清理入口，不在此文件实现领域业务。
 """
 
@@ -23,6 +23,7 @@ app.add_middleware(
     ],
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 app.include_router(model_upload_router)
 app.include_router(model_store_router)

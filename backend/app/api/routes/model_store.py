@@ -1,12 +1,17 @@
 """
-文件说明：提供模型与包络固化存储的写入、查询、资源下载和删除接口。
+文件说明：提供模型与包络的单个和全部固化、查询、按保存名称下载 STL/NPZ 和删除接口。
 路由只负责 HTTP 映射与错误转换，快照组装、资源暂存和 SQLite 读写均委托给固化存储服务。
 """
+
+from io import BytesIO
+from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 
 from app.domain.model_store import DEFAULT_PAGE_SIZE, MAXIMUM_PAGE_SIZE, ModelStoreError
+from app.domain.envelope_export import download_filename, write_envelope_stl
 from app.domain.model_store_service import EnvelopeNotReadyError, ModelMissingError, ModelStoreService
 from app.schemas.model_store import ModelStoreBatchDeletePayload, ModelStorePayload
 
@@ -57,6 +62,15 @@ def list_stored_models(
     return {**get_service().list_records(limit, offset, keyword), "summary": get_service().get_summary()}
 
 
+@router.post("/models/save-all")
+def save_all_models_to_store() -> dict:
+    """固化请求开始时的全部上传模型，返回逐项结果；单项失败不阻止后续项，空模型列表返回 409。"""
+    try:
+        return get_service().save_all_model_snapshots()
+    except (LookupError, ModelStoreError, EnvelopeNotReadyError, ValueError, OSError) as error:
+        _handle_error(error)
+
+
 @router.post("/models/batch-delete")
 def batch_delete_stored_models(payload: ModelStoreBatchDeletePayload) -> dict:
     """批量删除勾选的固化记录与资源，并返回实际删除数量。"""
@@ -94,7 +108,7 @@ def download_stored_source(record_id: str) -> FileResponse:
 
 @router.get("/models/{record_id}/envelope/preview.glb")
 def preview_stored_envelope(record_id: str) -> FileResponse:
-    """返回固化记录中与源模型共用局部坐标的包络浏览网格。"""
+    """返回固化记录中与当前模型共用局部坐标的包络浏览网格。"""
 
     try:
         path = get_service().get_envelope_preview_path(record_id)
@@ -104,14 +118,23 @@ def preview_stored_envelope(record_id: str) -> FileResponse:
 
 
 @router.get("/models/{record_id}/variants/{rot_z}")
-def download_stored_variant(record_id: str, rot_z: int) -> Response:
-    """按方向角下载固化包络的正式网格文件。"""
+def download_stored_variant(record_id: str, rot_z: int, format: Literal["npz", "stl"] = Query(default="npz")) -> Response:
+    """按方向下载固化正式包络；默认返回 NPZ，format=stl 时转换网格，文件名跟随记录名称。"""
 
     try:
         path = get_service().get_variant_path(record_id, rot_z)
-    except (LookupError, OSError) as error:
+        record = get_service().get_record(record_id)
+        filename = download_filename(record["device_name"], rot_z, format)
+        if format == "stl":
+            content = BytesIO()
+            write_envelope_stl(path, content)
+            return Response(content.getvalue(), media_type="model/stl", headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename, safe='')}",
+                "Cache-Control": "no-store",
+            })
+    except (LookupError, OSError, ValueError) as error:
         _handle_error(error)
-    return FileResponse(path, media_type="application/octet-stream", filename=path.name)
+    return FileResponse(path, media_type="application/octet-stream", filename=filename, headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/models/{record_id}", status_code=204)

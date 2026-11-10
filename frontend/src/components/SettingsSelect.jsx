@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from './icons.js';
 
 /**
  * 渲染受控的居中下拉控件。

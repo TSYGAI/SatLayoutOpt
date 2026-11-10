@@ -1,9 +1,9 @@
 /**
  * 文件说明：模型上传 React 页面，声明上传、模型库、Three.js 预览和统计区域的稳定 DOM 结构。
- * 现有业务控制器通过固定 ID 挂载，React 负责页面生命周期和公共外壳。
+ * 上传记录保留在应用会话；轻量加载器挂载业务控制器，预览加载与失败反馈仅占用右侧画布区域。
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   ChevronRight,
@@ -14,16 +14,21 @@ import {
   Search,
   Trash2,
   Waypoints,
-} from 'lucide-react';
+} from '../../components/icons.js';
 
 import { AppShell } from '../../app/AppShell.jsx';
 import { ModelPreviewPanel } from '../../components/ModelPreviewPanel.jsx';
-import { mountModelUploadPage } from './model-upload-page.js';
+import { mountModelUploadPage } from './model-preview-loader.js';
+import { ModelDeleteDialog } from './ModelDeleteDialog.jsx';
+import { UploadProgressList } from './UploadProgressList.jsx';
 import '../../../styles/model-upload.css';
 
 /** 渲染 STEP/GLB 模型管理与三维预览完整页面。 */
 export default function ModelUploadPage() {
-  useEffect(() => mountModelUploadPage(), []);
+  const [previewStartup, setPreviewStartup] = useState({ status: 'loading', message: '' });
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  useEffect(() => mountModelUploadPage(setPreviewStartup, { onRequestDelete: setDeleteTarget }), [previewAttempt]);
 
   return (
     <AppShell className="model-page-shell" pageTitle="模型上传" status="连接检查中" statusId="model-connection">
@@ -37,9 +42,9 @@ export default function ModelUploadPage() {
               <span className="upload-icon"><CloudUpload /></span>
               <strong>选择或拖入模型</strong>
               <small>仅支持 .stp 与 .step</small>
-              <input id="model-file-input" type="file" accept=".stp,.step" multiple />
+              <input id="model-file-input" type="file" accept=".stp,.step" multiple disabled={previewStartup.status !== 'ready'} />
             </label>
-            <div id="upload-queue" className="upload-queue" aria-live="polite" />
+            <UploadProgressList />
 
             <div className="artifact-strip" aria-label="模型数据链路">
               <div className="artifact-step source"><Box /><span><strong>STEP</strong><small>精确源模型</small></span></div>
@@ -69,9 +74,10 @@ export default function ModelUploadPage() {
           </section>
         </aside>
 
-        <ModelPreviewPanel />
+        <ModelPreviewPanel startup={previewStartup} onRetry={() => setPreviewAttempt((attempt) => attempt + 1)} />
       </main>
       <div id="toast" className="toast" role="status" aria-live="polite" hidden />
+      {deleteTarget && <ModelDeleteDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />}
     </AppShell>
   );
 }

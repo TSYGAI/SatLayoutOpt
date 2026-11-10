@@ -1,3 +1,384 @@
+# 前端单元测试入口的报告归档设置；与应用运行日志分开保存。
+[testing.frontend]
+# 相对于项目根目录，每次运行创建独立子目录；必须位于 test-results/unit/frontend 内。
+unit_output_dir = "test-results/unit/frontend"
+
+# 迁移基准只供 tests/ 中的隔离工具使用，不改变生产求解配置。
+[testing.migration_baseline]
+# 性能记录和隔离输入所在目录；每次运行创建独立子目录。
+output_dir = "test-results/performance/migration-stage-1"
+# 进程树和系统资源采样间隔，单位秒。
+sample_interval_seconds = 0.2
+# 单个真实模型或布局样本的最长观测时间，单位秒；超时必须记为未完成。
+case_timeout_seconds = 900
+# 相同真实布局输入的独立重复运行次数。
+layout_repeats = 2
+# 基准每轮试次上限；仅在隔离进程内覆盖，不修改正式每轮 10000 次预算。
+layout_attempts_per_round = 32
+# 从按文件体积排序的真实上传模型中选取最小、中位、最大三个分位点。
+model_size_quantiles = [0.0, 0.5, 1.0]
+# 浏览器等待真实预览或后台任务的最长时间，单位毫秒。
+browser_timeout_ms = 180000
+# 旋转交互时连续采集的 requestAnimationFrame 间隔数量；不等同于 GPU 渲染帧率。
+browser_frame_samples = 120
+
+# 第三阶段计算协议与多进程原型的隔离验收参数，不修改生产求解预算。
+[testing.compute_engine]
+# 相同数值快照参与对照的进程数量，1 表示独立引擎内串行执行。
+worker_counts = [1, 4, 6]
+# 原始小预算结果对照，以及用于观察并行收益的固定试次预算。
+attempt_budgets = [32, 256]
+# 各进程数、各预算独立重复次数。
+repeats = 2
+# 单次进程协议验收与性能测试超时，单位秒。
+timeout_seconds = 600
+# 整棵计算进程树 CPU 与内存采样间隔，单位秒。
+sample_interval_seconds = 0.1
+
+# 第五阶段正式 HTTP 调度链的隔离基准；不改变正式每轮尝试上限。
+[testing.rust_scheduler]
+# 固定每轮预算，用于比较串行、四、五、六进程的真实业务结果。
+attempt_budget = 256
+# 每组启动独立 Rust 服务并执行冷缓存、热缓存两个任务。
+worker_counts = [1, 4, 5, 6]
+# 每种进程数重复任务次数，至少两次以验证准备缓存命中。
+repeats = 2
+# 额外多进程持续求解预算，用于检查长任务的取消、响应及内存变化。
+long_attempt_budget = 2048
+# 单次业务任务的验收超时，单位秒，仅限隔离基准工具。
+timeout_seconds = 600
+# HTTP 状态和进程树采样间隔，单位秒。
+sample_interval_seconds = 0.1
+
+# 固定约束真实接口和浏览器回归的本机环境设置。
+[testing.fixed_constraints]
+# 浏览器回归使用的 Chromium 系浏览器可执行文件；其他机器需调整该路径。
+browser_executable = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+
+# 包络分批真实模型验收；输入只读，所有输出位于 test-results。
+[testing.envelope_batching]
+# 独立射线验收的每批探针上限；不改变探针总数，内存不足时验证器自动缩小批次。
+verification_batch_size = 128
+# 桌面端当前上传列表，包含本次验收的八个真实模型。
+model_root = "data/desktop/tauri/data/uploads/models"
+# 真实模型的源网格缓存，只在源指纹、姿态和离散公差一致时复用。
+artifact_root = "data/desktop/tauri/data/processed/models"
+# 覆盖历史 384、当前默认 500 和 1000 分辨率，保留已有性能验收档位。
+resolutions = [384, 500, 1000]
+# 左、右、前、后、上、下六个方向的互异增量，单位毫米。
+distinct_clearances_mm = [7, 19, 31, 43, 59, 73]
+# 单个真实场景的最长验收时间，单位秒；超时记为失败，不视为生成成功。
+case_timeout_seconds = 7200
+# 进程私有内存采样周期，单位秒。
+sample_interval_seconds = 0.1
+
+# 独立计算引擎的协议与进程限制；布局生产调度由 Rust 根据资源快照选择 workers。
+[compute_engine]
+# JSON 控制请求最大字节数；几何数组必须通过二进制资源交接。
+request_max_bytes = 8388608
+# 单条进度或终态协议消息最大字节数，避免把大型数组塞入标准输出。
+event_max_bytes = 1048576
+# 独立引擎允许启动的数值计算工作进程上限，正式任务另受 Rust 资源预算约束。
+max_workers = 6
+# 每个数值工作进程的 BLAS/OpenMP 线程数，防止进程与线程层叠争用。
+numeric_threads_per_worker = 1
+# 在途与待归并结果总数上限为进程数乘此值，允许短试次补位；实际派发仍受每轮预算约束。
+prefetch_per_worker = 2
+# 等待子任务结果时检查取消的间隔，单位秒。
+poll_interval_seconds = 0.1
+# 客户端请求取消后的退出宽限期，超过后回收计算进程树，单位秒。
+cancel_grace_seconds = 8.0
+# 人工微调复用一个隔离数值进程，避免每次校核重复启动和导入；不复用任务或校核结果。
+refinement_worker_enabled = true
+# 微调计算进程空闲多久后自动回收，单位秒；后续请求按需重新创建。
+refinement_worker_idle_seconds = 60.0
+# 微调常驻进程读取控制管道的检查间隔，单位秒；兼顾输入响应和空闲 CPU 开销。
+refinement_worker_poll_seconds = 0.01
+# 正式数值工作池采样内存并调整派发的间隔，单位秒。
+resource_sample_seconds = 0.5
+# 实测工作进程峰值乘此安全系数后用于下一次派发估算。
+memory_estimate_margin = 1.25
+# 每个数值进程的安装姿态缓存上限，单位字节；超出后按最近使用顺序淘汰。
+mount_cache_bytes = 33554432
+
+# 包络进度只随实际阶段和工作批次前进；100% 保留给 Rust 校验并发布成功的终态。
+[envelope_progress]
+# 计算进度事件的有界缓冲数量，避免阻塞几何计算和宿主取消处理。
+event_capacity = 64
+
+# 各阶段在单模型进度中的起止百分比；表示工作进度权重，不表示预计耗时。
+[envelope_progress.ranges]
+# 检查同参数包络或源网格缓存。
+source_loading = [1, 5]
+# 完整 STEP 三角离散。
+step_tessellation = [5, 20]
+# 单位、比例、模型坐标和初始姿态归一化。
+source_normalization = [20, 23]
+# 检查六向增量和精细化参数。
+parameter_validation = [23, 25]
+# 计算网格格距并分配整网格或磁盘分批工作空间。
+grid_planning = [25, 27]
+# 按源三角面批次或磁盘网格分片保守栅格化。
+surface_rasterization = [27, 60]
+# 封连细缝并按全局连通关系填充内部空间。
+exterior_fill = [60, 72]
+# 按六向增量扫掠占据区域。
+directional_sweep = [72, 82]
+# 重建、简化、融合并校验正式包络表面。
+surface_extraction = [82, 93]
+# 保存源网格缓存和正式产物清单。
+artifact_write = [93, 98]
+
+# Rust/Tauri 运行日志；正常简洁，慢、停滞和失败时展开步骤与对象。
+[logging]
+# 相对于项目根目录（安装版为程序目录）的统一日志根目录；按启动日期、前后端及每日会话编号组织。
+root_dir = "logs"
+# 单文件写入队列上限；满时计数告警，不阻塞业务线程。
+queue_capacity = 2048
+# 每个操作保留的最近步骤数量，异常时展开。
+recent_capacity = 32
+# 单字段最多字符数，超出明确标记截断。
+field_max_chars = 8192
+# 程序异常仅保留最近的有效调用位置数量，省略完整路径和监测包装调用。
+stack_frame_limit = 4
+# 宿主独立监测间隔，单位毫秒。
+watchdog_interval_ms = 1000
+# 普通请求及前端操作耗时预警阈值，单位毫秒；统一为 5 分钟。
+slow_request_ms = 300000
+# 文件、解码、模型校验等内部步骤耗时预警阈值，单位毫秒；统一为 5 分钟。
+slow_step_ms = 300000
+# CAD、求解等长计算耗时预警阈值，单位毫秒；统一为 5 分钟。
+slow_compute_ms = 300000
+# 同一执行者连续 5 分钟无实际进展才提示疑似停滞，单位毫秒；不代表已确认死锁。
+stalled_ms = 300000
+# 同一慢步骤重复提醒最短间隔，单位毫秒。
+repeat_ms = 60000
+# 桌面遥测请求体上限，单位字节。
+telemetry_max_bytes = 262144
+# 单批桌面遥测事件数上限。
+telemetry_batch_size = 64
+# 桌面遥测批量发送间隔，单位毫秒；阶段开始会立即发送。
+frontend_flush_ms = 500
+
+# Rust 业务宿主；与 Python 计算引擎独立构建，共享既有持久化数据格式。
+[rust_backend]
+# Cargo 构建产物位于项目数据目录，不写入源码。
+build_dir = "data/build/rust-backend"
+# 计算任务输入副本和暂存输出；发布成功或失败后清理。
+staging_dir = "data/processed/compute-tasks"
+# 同一数据目录只允许一个 Rust 业务进程写入，进程退出自动释放系统文件锁。
+lock_file = "data/processed/rust-backend.lock"
+# SQLite 等待现有事务释放锁的最长时间，单位秒。
+database_timeout_seconds = 30
+# 普通 JSON 请求体上限，避免元数据接口接收大模型数据。
+json_max_bytes = 8388608
+# 生产包络算法标识；与 Python 计算模块的算法契约保持一致。
+envelope_algorithm = "exterior_occupancy_directional_sweep_v9"
+# 生产布局任务允许的数值工作进程上限；实际数量还受 CPU、内存和其他活动任务限制。
+compute_worker_cap = 6
+# 为桌面、HTTP 服务和操作系统保留的逻辑处理器数量。
+compute_cpu_reserve = 4
+# 为操作系统、桌面和 Rust 服务保留的物理内存，单位为字节。
+compute_memory_reserve_bytes = 3319791616
+# 每个 Python 数值工作进程的保守私有内存预算，单位为字节；只用于派发上限估算。
+compute_worker_memory_bytes = 268435456
+# 全软件可控内存的总预算比例；先扣除界面、缓存和显示工作空间，再供全部计算任务共享。
+compute_memory_fraction = 0.8
+# 计算协调进程或 CAD 进程的基础内存预留，单位字节。
+compute_host_memory_bytes = 536870912
+# 将输入文件体积放大为数组映射和几何临时空间预算的倍数。
+compute_input_memory_factor = 3
+# 每个 CAD 进程允许的 OpenCascade 原生线程数，同时计入全局 CPU 槽位。
+compute_cad_threads = 6
+# 普通进度聚合后写入 SQLite 的最短间隔；候选和终态立即写入，单位秒。
+progress_flush_seconds = 0.5
+# 可再生成的布局准备缓存目录；缓存包含带摘要的 NPY 和兼容历史 NPZ。
+prepared_cache_dir = "data/processed/layout-prepared-cache"
+# 准备缓存磁盘总量上限，超限淘汰最久未使用条目，单位字节。
+prepared_cache_max_bytes = 2617245696
+# 准备算法或验收语义改变时增加此版本；版本 13 增加按高度关联的锥段许可，继承共面区域基准及真实包络接触悬高。
+prepared_cache_version = 13
+# 最近一次固定预览的正式包络与验收结果；独立于历史任务，缺失时正常重新准备。
+fixed_preview_cache_dir = "data/processed/fixed-preview-cache"
+# 单槽固定预览缓存最大字节数；超限仍返回正式结果，只跳过缓存。
+fixed_preview_cache_max_bytes = 117440512
+# 可再生成的布局显示网格缓存，源 NPZ 始终保留在历史目录。
+mesh_cache_dir = "data/processed/layout-mesh-cache"
+# 显示网格磁盘缓存总容量（字节），按最近访问淘汰。
+mesh_cache_max_bytes = 2617245696
+# 单型号二进制网格最大字节数；超出时明确报错，避免无界解压与传输。
+mesh_max_bytes = 67108864
+# 固定约束页正式包络显示二进制的单文件上限，单位字节；超限时前端可按实际内存条件回退旧网格接口。
+fixed_display_max_bytes = 603979776
+
+# 硬件设置页按业务阶段分配的 CPU 预算；保存后重启应用统一生效。
+[hardware]
+# 软件界面与服务基础内存的估计余量，单位字节；缓存与显示工作空间另计，不是操作系统硬限制。
+application_memory_overhead_bytes = 268435456
+# 所有计算任务合计最多同时运行的进程宿主数；仍受 CPU 和内存准入限制。
+max_concurrent_tasks = 4
+# 模型上传第一阶段（快速交互预览）每个任务的 CAD 线程上限。
+upload_interaction_threads = 4
+# 模型上传第二阶段（细节预览）每个任务的 CAD 线程上限。
+upload_detail_threads = 2
+# 包络生成每个任务的 CAD 线程上限；体素阶段仍按算法自身的分批流程执行。
+envelope_threads = 6
+# 前置配置的罩体与安装参考 CAD 线程、固定预览与显示资源数值库线程上限。
+pre_config_threads = 4
+# 数据管理中按需生成包络浏览资源和导出的数值库线程上限；串行写入不会自动并行。
+data_management_threads = 2
+
+# 点击按钮时生成三档全软件共享预算；只生成建议，确认并保存后重启生效。
+[hardware.recommendation]
+# 低、中、高三档的整机资源预算比例，按从低到高排列。
+resource_fractions = [0.40, 0.60, 0.80]
+# 弹窗默认选中方案，索引从 0 开始；1 表示中档。
+default_tier_index = 1
+# 从软件 CPU 预算中给界面与服务留出的槽位；小型电脑至少保留一个计算槽位。
+application_cpu_slots = 1
+# 当前可用内存中额外保留的动态安全余量比例；与三档总预算共同约束，不重复预留其他程序已用内存。
+memory_reserve_fraction = 0.10
+# 系统预留内存的推荐下限，单位字节。
+memory_reserve_min_bytes = 1073741824
+# 系统预留内存的推荐上限，单位字节。
+memory_reserve_max_bytes = 4294967296
+# 推荐每个布局数值进程的线程数；优先让多进程承担并行。
+numeric_threads = 1
+# 推荐布局工作进程数的上限，还受当前引擎硬上限和 CPU、内存约束。
+worker_cap = 8
+# 推荐同时运行宿主任务数的上限。
+concurrent_tasks_cap = 4
+# 推荐准入估计中为模型输入和额外数组保留的余量，单位字节。
+task_headroom_bytes = 536870912
+# 单个包络进程的目标预算占计算容量的比例；至少容纳宿主、工作空间和输入余量。
+envelope_memory_fraction = 0.50
+# 推荐单个包络进程内存上限的最大值，单位字节。
+envelope_memory_max_bytes = 8589934592
+
+# 缓存和工作空间推荐策略；内存规则按所属预算取比例，限制到 MiB 边界后按 step_mib 向下对齐。
+[hardware.recommendation.resources]
+# 预览数组缓存占软件总预算的比例，以及最小、最大和递增粒度（MiB）。
+preview_cache = { fraction = 0.06, min_mib = 128, max_mib = 4096, step_mib = 64 }
+# 最近记录原始预览缓存的比例与 MiB 边界；解码显示另计。
+data_cache = { fraction = 0.01, min_mib = 32, max_mib = 512, step_mib = 32 }
+# 共享显示几何占软件总预算的比例与 MiB 边界；同步作为前后端单资源上限。
+display_geometry = { fraction = 0.025, min_mib = 64, max_mib = 1024, step_mib = 64 }
+# 显示网格工作空间占软件总预算的比例与 MiB 边界，推荐值不得小于几何预算。
+display_worker = { fraction = 0.05, min_mib = 128, max_mib = 2048, step_mib = 64 }
+# 单模型磁盘预览缓存按处理规模估算的比例与 MiB 边界，不表示磁盘可用容量。
+preview_disk = { fraction = 0.03, min_mib = 64, max_mib = 2048, step_mib = 64 }
+# 固定预览单槽磁盘缓存的比例与 MiB 边界。
+fixed_preview_disk = { fraction = 0.005, min_mib = 16, max_mib = 256, step_mib = 16 }
+# 共享显示磁盘缓存的比例与 MiB 边界，同时保证可容纳一个资源及格式索引。
+display_disk = { fraction = 0.10, min_mib = 256, max_mib = 8192, step_mib = 64 }
+# 布局准备磁盘缓存按处理规模估算的比例与 MiB 边界。
+prepared_disk = { fraction = 0.10, min_mib = 256, max_mib = 8192, step_mib = 64 }
+# 推导后台常驻模型数时的单模型数组容量估计（字节），实际仍按缓存总字节数淘汰。
+preview_model_bytes = 268435456
+# 推荐后台常驻模型数量上限，不含当前场景。
+preview_model_cap = 16
+# 包络单批空间占扣除界面和缓存后的计算预算比例，以及 MiB 边界和粒度。
+envelope_workspace = { fraction = 0.04, min_mib = 64, max_mib = 1024, step_mib = 64 }
+# 体素批次占单批空间的比例；每单元按 16 字节估计，数量限定在 minimum/maximum 并按 step 对齐。
+voxel_batch = { fraction = 0.50, bytes_per_item = 16, minimum = 32768, maximum = 67108864, step = 32768 }
+# 表面提取分阶段占用空间；每单元按 512 字节估计，边界与粒度单位均为单元。
+surface_batch = { fraction = 0.50, bytes_per_item = 512, minimum = 32768, maximum = 1048576, step = 32768 }
+# 栅格投影与体素数组共同占用空间；每单元按 160 字节估计，边界与粒度单位均为单元。
+raster_batch = { fraction = 0.078125, bytes_per_item = 160, minimum = 1024, maximum = 1048576, step = 1024 }
+# 源三角面临时数组的比例；每面保守按 1024 字节估计，边界与粒度单位均为三角面。
+triangle_batch = { fraction = 0.015625, bytes_per_item = 1024, minimum = 256, maximum = 16384, step = 256 }
+
+# 各功能按重要程度和实际并行特征申请共享资源；下列比例是单任务需求上限，不是固定分区。
+[hardware.scheduling]
+# 每等待这些秒增加一次优先级，避免低优先级任务长期饥饿；已运行任务不抢占。
+aging_interval_seconds = 30
+# 每次等待老化增加的优先级分数；同分按入队先后执行。
+aging_priority_step = 10
+
+[hardware.scheduling.interaction]
+# 可运行的线程下限；预算不足此值时排队，不强行启动。
+minimum_threads = 1
+# 单任务最低估计内存，单位字节；实际申请还会按模型输入和工作空间提高。
+minimum_memory_bytes = 805306368
+# 快速交互预览优先响应用户。
+priority = 100
+# 单任务可申请计算 CPU 槽位的比例。
+cpu_fraction = 0.6
+# 快速网格生成建议线程上限。
+thread_cap = 4
+
+[hardware.scheduling.pre_config]
+# 可运行的线程下限。
+minimum_threads = 1
+# 单任务最低估计内存，单位字节；大模型自动提高申请量。
+minimum_memory_bytes = 805306368
+# 前置设置与可见预览优先响应操作。
+priority = 90
+# 单任务可申请计算 CPU 槽位的比例。
+cpu_fraction = 0.5
+# 前置处理建议线程上限。
+thread_cap = 4
+
+[hardware.scheduling.layout]
+# 数值任务最低工作线程数，协调进程另计槽位。
+minimum_threads = 1
+# 布局协调与工作进程最低合计估计内存，单位字节。
+minimum_memory_bytes = 1073741824
+# 正式布局求解属于核心重计算。
+priority = 80
+# 空闲时允许布局工作进程使用全部剩余计算槽位。
+cpu_fraction = 1.0
+# 布局协调与准备阶段建议线程上限；数值池另受引擎上限约束。
+thread_cap = 6
+
+[hardware.scheduling.envelope]
+# 包络任务最低线程数。
+minimum_threads = 1
+# 包络宿主、工作空间及输入余量的最低估计内存，单位字节。
+minimum_memory_bytes = 1342177280
+# 正式包络生成优先于后台细节与数据处理。
+priority = 70
+# CAD 阶段需求比例，体素阶段按实际内存分批。
+cpu_fraction = 0.8
+# 包络 CAD 建议线程上限。
+thread_cap = 6
+
+[hardware.scheduling.detail]
+# 细节任务最低线程数。
+minimum_threads = 1
+# 细节任务最低估计内存，单位字节；大模型按输入追加。
+minimum_memory_bytes = 805306368
+# 细节预览在快速预览与核心计算之后执行。
+priority = 40
+# 后台细节任务的 CPU 需求比例。
+cpu_fraction = 0.35
+# 细节处理包含串行步骤，不盲目增加线程。
+thread_cap = 3
+
+[hardware.scheduling.data]
+# 数据生成与导出最低线程数。
+minimum_threads = 1
+# 数据任务最低估计内存，单位字节。
+minimum_memory_bytes = 671088640
+# 数据管理的生成和导出任务优先级。
+priority = 30
+# 数据处理的 CPU 需求比例。
+cpu_fraction = 0.25
+# 数据处理建议线程上限。
+thread_cap = 2
+
+[hardware.scheduling.other]
+# 未分类任务最低线程数。
+minimum_threads = 1
+# 未分类任务最低估计内存，单位字节。
+minimum_memory_bytes = 536870912
+# 未分类任务采用保守优先级。
+priority = 20
+# 未分类任务的 CPU 需求比例。
+cpu_fraction = 0.25
+# 未分类任务建议线程上限。
+thread_cap = 2
+
 [backend]
 # 后端 API 监听地址。
 host = "127.0.0.1"
@@ -13,22 +394,24 @@ model_preview_detail_linear_ratio = 0.0005
 model_preview_detail_angular_degrees = 10.0
 # 交互预览初始线性公差占模型最大包围尺寸的比例。
 model_preview_interaction_linear_ratio = 0.002
-# 交互预览允许使用的最大线性公差比例。
+# 旧交互流程允许使用的最大线性公差比例；快速模式使用初始公差且不重复降精度。
 model_preview_interaction_max_linear_ratio = 0.005
 # 交互预览初始角度公差，单位为度。
 model_preview_interaction_angular_degrees = 20.0
-# 交互预览允许使用的最大角度公差，单位为度。
+# 旧交互流程允许使用的最大角度公差，单位为度；快速模式使用初始角度公差。
 model_preview_interaction_max_angular_degrees = 30.0
-# 交互预览目标三角形数量，超出时逐级放宽离散公差。
+# 旧交互流程目标三角形数量，超出时逐级放宽公差；快速模式不按此值减面。
 model_preview_interaction_triangle_target = 250000
-# 保守外壳判定时每个 STEP 面最多使用的采样点数量。
+# 是否使用原生三维建模引擎并行网格化生成完整交互预览；细节档仍执行保守外壳筛选。
+model_preview_interaction_fast_enabled = true
+# 外壳可见性快速检查时每面最多使用的采样点数量；删面仍须通过精确实体内含校验。
 model_preview_shell_samples_per_face = 9
 # 外壳射线起点偏移占模型包围盒对角线的比例。
 model_preview_shell_ray_epsilon_ratio = 0.0000001
 # 浏览器预览派生产物版本；变更时自动重建双 LOD、外壳表、面映射和 STEP 拓扑边线。
-model_preview_artifact_version = 3
+model_preview_artifact_version = 6
 # 浏览器合并完成的预览二进制缓存单个文件最大体积，单位为字节；超出时拒绝写入以保护本地磁盘。
-model_preview_runtime_cache_max_bytes = 536870912
+model_preview_runtime_cache_max_bytes = 738197504
 # 旧模型索引缺少设备名称时的兼容默认值；新上传模型默认使用上传文件名（不含扩展名）。
 model_settings_default_device_name = "GPS satellite"
 # 模型设置页的默认比例，必须大于 0。
@@ -49,20 +432,44 @@ model_envelope_step_linear_ratio = 0.0022222222222222222
 model_envelope_step_min_linear_tolerance_mm = 0.5
 # 包络读取完整 STEP 时的角度离散公差，单位为度；0.25 弧度对应此值。
 model_envelope_step_angular_degrees = 14.32394487827058
-# 局部轮廓修正使用的投影格数；固定网格用于合并重复投影三角形并控制计算量。
-model_envelope_refinement_grid_size = 384
-# 绕 Z 轴均匀使用的竖向局部修正投影方向数量；20 表示每 9 度覆盖一个唯一投影平面，减少相同圆柱结构在不同观察方位的棱面差异。
+# 新模型及缺少包络设置的历史模型的默认体素分辨率；各模型可独立覆盖，格距为源最长边除以该值。
+model_envelope_refinement_grid_size = 500
+# 每模型体素分辨率的最小格数；不得低于现有三维算法要求的 32 格。
+model_envelope_refinement_grid_min = 32
+# 旧投影算法的兼容字段；三维 v9 不使用方向采样，保留字段以兼容既有任务。
 model_envelope_refinement_direction_count = 20
-# 连续性核心相对侧投影短边的内缩比例；12% 仅保留内部连接，不覆盖圆筒、支架和底座间的大尺度收缩。
+# 旧连接核心的兼容字段；三维 v9 不构造凸包核心。
 model_envelope_connectivity_core_inset_ratio = 0.12
-# 侧投影真实轮廓向外平滑的比例；用于忽略螺钉和细棱等小凸起。
+# 旧投影平滑的兼容字段；三维 v9 使用一格保护层，实际误差写入产物质量统计。
 model_envelope_detail_smoothing_ratio = 0.008
-# 侧投影轮廓简化比例；只合并小尺度锯齿，不允许突破最大内缩核心。
+# 旧投影简化的兼容字段；三维 v9 不使用此比例。
 model_envelope_outline_simplify_ratio = 0.004
-# 平滑后允许直接封连的窄缝宽度占侧投影短边的比例；6% 用于跨过支架窄槽，较宽凹陷继续保留，0 表示关闭封缝。
+# 三维细缝闭运算宽度占源最短边的比例，同时受毫米上限限制；0 关闭封缝。
 model_envelope_gap_bridge_ratio = 0.06
-# 包络算法版本；修改轴向放大或局部轮廓修正规则时递增，使旧产物自动失效。
-model_envelope_artifact_version = 9
+# 包络算法版本；修改六向轮廓扩张或局部修正规则时递增，使旧产物自动失效。
+model_envelope_artifact_version = 13
+# 仅旧 Python 独立调用使用的包络失败诊断目录；Rust 托管计算使用临时快照并汇入当次后端会话日志。
+model_envelope_failure_log_dir = "data/logs/envelope"
+# 三维包络最多封连的细小缝隙宽度（毫米）；明显可装载凹陷不会按模型总尺寸扩大封缝。
+model_envelope_gap_bridge_limit_mm = 3.0
+# 单批占据网格的单元上限；按整机 8GB 设置，超出时保持格距并分批融合，不限制总单元数。
+model_envelope_voxel_max_cells = 27262976
+# 单个表面提取分块的采样单元上限，含保护边；用于限制原生几何库的瞬时内存。
+model_envelope_surface_batch_cells = 851968
+# 直接 Python 调用的分批临时目录，相对数据根目录；正式 Rust 任务放在 staging_dir 的任务目录内，取消也会回收。
+model_envelope_scratch_dir = "data/processed/envelope-workspace"
+# 分批计算后必须保留的磁盘可用空间，单位字节；不足时明确报告，不降低分辨率。
+model_envelope_scratch_reserve_bytes = 1073741824
+# 保守三角面栅格化每次读取的源三角面数量，限制网格索引临时数组。
+model_envelope_raster_triangle_batch = 13312
+# 每批栅格化允许枚举的二维投影单元数；巨大三角面自动分条处理。
+model_envelope_raster_batch_cells = 425984
+# 三维精细化单批数组工作空间上限（字节）；实际再受已分配任务预算和可用内存限制。
+model_envelope_workspace_memory_bytes = 872415232
+# 包络进程私有内存上限（字节）；8GB 基准为 3GB，实际只使用统一调度剩余预算。
+model_envelope_process_memory_limit_bytes = 8589934592
+# 包络计算必须留给操作系统、桌面和其他程序的物理内存（字节）。
+model_envelope_memory_reserve_bytes = 3319791616
 # 模型与包络固化存储目录，相对于项目根目录；数据库文件与每个固化记录的二进制资源都在此目录下。
 model_store_dir = "data/store"
 # 固化存储的 SQLite 数据库文件名，位于 model_store_dir 内。
@@ -82,59 +489,121 @@ pre_config_cylinder_subdir = "cylinders"
 min_satellite_count = 0
 # 单类卫星数量上限，用于约束误配置导致的异常写入。
 max_satellite_count = 1000
-# 自定义整流舱段底面半径下限，单位为毫米，必须大于 0。
+# 内部安装筒半径下限，单位为毫米，必须大于 0。
 min_cylinder_radius_mm = 0.001
-# 自定义整流舱段高度下限，单位为毫米，必须大于 0。
+# 内部安装筒高度下限，单位为毫米，必须大于 0。
 min_cylinder_height_mm = 0.001
-# 自定义整流舱段底面半径、高度及整流罩半径的上限，单位为毫米，用于约束异常写入。
+# 内部安装筒半径、高度及整流罩外部半径的上限，单位为毫米，用于约束异常写入。
 max_cylinder_size_mm = 1000000.0
-# 自定义整流舱段圆周方向的分段数量，用于生成 B-Rep 侧面的顶点点位。
+# 整流罩和内部安装筒圆周方向的分段数量，用于生成预览和 B-Rep 侧面的顶点点位。
 cylinder_radial_segments = 96
-# 新打开前置配置页时预填的整流舱段底面半径区间两端默认值，单位为毫米。
+# 新打开前置配置页时预填的内部安装筒半径区间两端默认值，单位为毫米。
 default_cylinder_radius_mm = 400.0
-# 自定义整流舱段中轴（中心杆）半径的下限，单位为毫米，必须大于 0。
+# 内部安装筒质心最大偏移下限，单位为毫米，必须大于 0。
 min_axis_radius_mm = 0.001
-# 新打开前置配置页时预填的中轴半径，单位为毫米。
+# 新打开前置配置页时预填的质心最大偏移，单位为毫米。
 default_axis_radius_mm = 80.0
 # 整流罩半径下限，单位为毫米，必须大于 0。
 min_fairing_shell_radius_mm = 0.001
-# 新打开前置配置页时预填的整流罩半径，单位为毫米，必须大于默认整流舱底面半径。
+# 新打开前置配置页时预填的整流罩外部边界半径，单位为毫米，必须大于默认安装筒半径。
 default_fairing_shell_radius_mm = 800.0
-# 新打开前置配置页时预填的整流舱段高度区间两端默认值，单位为毫米。
+# 新打开前置配置页时预填的内部安装筒高度区间两端默认值，单位为毫米。
 default_cylinder_height_mm = 3600.0
+# 安装筒基座预载的下底面半径，单位为毫米；预载时不超过当前罩底半径。
+default_installation_base_lower_radius_mm = 600.0
+# 安装筒基座预载高度，单位为毫米；筒体高度不包含此值。
+default_installation_base_height_mm = 200.0
 
-# 分层布局优化参数；没有任务超时或总迭代次数上限。
+# A+B 布局优化参数；没有任务总超时，CP 工作量与整个任务的规划试次均有上限。
 [layout_optimization]
 # 历史项目名称的最大字符数；重命名只改变展示名称，不改原始任务备注。
 history_name_max_length = 120
+# 新建布局项目的默认名称前缀；仅同前缀加纯数字的现存名称参与续号。
+history_default_name_prefix = "未命名项目"
+# 默认名称编号的最少位数；不足时补零，超过后自然扩展。
+history_default_name_digits = 2
 # 优化任务输入、进度与结果的本地持久化目录。
 storage_dir = "data/history/layout_optimization"
-# 固定交付的不同布局数量。
+# 结果区默认展示数量；不限制搜索及服务端候选存档。
 candidate_count = 5
+# 新任务“展示方案数量”的默认值；按后端评分排名截取，不限制内部搜索候选数量。
+candidate_limit = 100
+# 服务端候选存档上限，优先保留尺寸 Pareto 前沿和两端折中。
+candidate_archive_limit = 100
+# A+B 总数值试次预算；仍受每轮上限约束，构造阶段和改善阶段共享。
+hybrid_attempt_budget = 256
+# 构造阶段在半径网格上均匀覆盖的最大点数，包含最大和最小半径；其余由邻域细化。
+hybrid_radius_samples = 12
+# 总预算中留给 ALNS 改善的比例。
+alns_budget_fraction = 0.4
+# 每次指定半径和层数的 CP 分组方案数量默认上限；布局页可按任务调整，构造与 ALNS 修复共用。
+cp_partition_limit = 4
+# CP-SAT 单次确定性工作量上限，避免墙钟超时造成种子不可复现。
+cp_deterministic_time = 0.2
+# CP 环向占用量的整数刻度，单位为每弧度刻度数。
+cp_angle_scale = 100000
+# 低位优先构造每个安装单元的基础环向采样数；另加入已放星角投影边缘作为接触事件。
+bottom_up_angle_samples = 16
+# 基座静态接触搜索的距离精度，单位毫米；返回安全端点，最终碰撞验收仍使用独立几何容差。
+vertical_contact_precision_mm = 0.05
+# CP层质量软目标的整数刻度，单位为每千克刻度数；提高小质量差的分辨率。
+layer_mass_scale = 1000
+# ALNS 每次移除的安装单元比例；硬对称单元整体移除。
+alns_destroy_fraction = 0.4
+# ALNS 算子奖励的指数更新系数，范围 (0,1]。
+alns_reaction = 0.2
+# ALNS 新增非支配候选的奖励。
+alns_improvement_reward = 6.0
+# ALNS 获得合法但被支配候选的奖励。
+alns_feasible_reward = 1.0
+# ALNS 失败算子的最小奖励，保持探索概率。
+alns_failure_reward = 0.1
 # 结构去重时安装轴向矩阵保留的小数位数，用于消除坐标变换浮点噪声。
 candidate_orientation_decimals = 6
+# 展示目标的参考尺度，单位毫米；实际 Pareto 支配使用原始值，软约束不得越级。
+objective_tolerance_mm = 1.0
 # 指定安装面到舱体安装位置的悬高范围默认最小值，单位为毫米。
 min_suspension_mm = 0.0
 # 指定安装面到舱体安装位置的悬高范围默认最大值，单位为毫米。
 max_suspension_mm = 20.0
 # 圆柱半径扫描步长默认值，单位为毫米；布局页可按任务覆盖。
 radius_step_mm = 1.0
+# 任务试次预算硬上限；A+B 实际取此值与 hybrid_attempt_budget 的较小值，所有策略共享。
+max_attempts_per_round = 20000
 # 每次连续求解的迭代数；单次未收敛后继续尝试，不作为整个任务的停止条件。
 local_iterations = 300
-# 每个半径点每个层数保留的组合数量；固定值用于完整半径扫描。
+# 旧诊断分组器的束宽；正式 A+B 使用 cp_partition_limit。
 partition_beam = 64
-# 每个半径点每个组合尝试的环向排序数量；固定值用于完整半径扫描。
-ordering_trials = 8
-# 可重复搜索的默认随机种子。
+# 连续修复的种子角扰动尺度分母；角标准差为 pi/ordering_trials。
+ordering_trials = 100
+# 旧快照及固定约束预览的兼容种子；新优化任务由后端独立生成随机种子并保存。
 random_seed = 42
+# 随机种子允许的最大整数，使用无符号 32 位范围以保证浏览器与后端精确传递。
+random_seed_max = 4294967295
 # 几何验收的浮点误差，单位为毫米。
 geometry_tolerance_mm = 0.0001
 # 安装面法向与向上轴单位向量的无量纲误差；独立于毫米长度容差。
 orientation_tolerance = 0.000001
-# 两个侧挂层必须至少相差的质量，单位为千克。
+# 层质量递减偏好的最小差，单位千克；用于构造、择优与报告，不作为合法性红线。
 layer_mass_margin_kg = 0.000001
-# 左侧栏保留的最近进度记录条数，完整输入和最终结果单独持久化。
+# 左侧栏保留的最近非空文字进度记录条数；资源采样仅更新最新状态，完整输入和最终结果单独持久化。
 progress_history_size = 80
+# 人工微调旧客户端兼容等待值，单位毫秒；新版每次操作立即校核，不等待停止点击。
+refinement_debounce_ms = 0
+# 实时校验会话的空闲保留时间，单位秒；保留最新版本以拒绝网络乱序的旧请求。
+refinement_session_idle_seconds = 900
+# 后端保留的实时校验会话上限；不同浏览器与来源相互隔离。
+refinement_session_limit = 128
+# 每个微调草稿的命令上限，达到后需保存为新版本。
+refinement_command_limit = 1000
+# 人工微调的环向按钮默认步长，单位度。
+refinement_angle_step_deg = 1.0
+# 人工微调的升降按钮默认步长，单位毫米。
+refinement_height_step_mm = 10.0
+# 人工微调顶部卫星沿全局 X/Y 平移的按钮默认步长，单位毫米。
+refinement_translation_step_mm = 10.0
+# 人工微调的悬高按钮默认步长，单位毫米。
+refinement_suspension_step_mm = 1.0
 
 # 布局安装表“长度、高度、宽度、水平、竖直”五列的固定默认值；末列重量读取方案保存的单星质量。
 [layout_optimization.export]
@@ -156,15 +625,45 @@ host = "127.0.0.1"
 # 前端静态服务器监听端口。
 port = 11111
 # 允许通过反向代理访问前端的域名；只写主机名，本机 localhost 与 IP 由 Vite 默认允许。
-allowed_hosts = []
+allowed_hosts = ["genvis.win"]
 # 浏览器调用 API 的基地址；使用 / 保持同源，由前端服务将 /api 转发到上述 backend 地址。
 api_base_url = "/"
+# 开发启动等待前端资源和后端端口就绪的最长时间，单位为毫秒；超时会回收本次启动的服务。
+dev_startup_timeout_ms = 60000
+# 开发启动检查后端端口的间隔，单位为毫秒。
+dev_poll_interval_ms = 100
+# 自动打开浏览器前预热的前端模块 URL；仅预热公共入口与默认模型上传页及其静态依赖。
+dev_warmup_paths = ["/frontend/src/main.jsx", "/frontend/src/pages/model-upload/ModelUploadPage.jsx"]
+# Vite 开发监听排除的目录，相对于项目根；硬件设置保存不触发页面重载，重启后读取活动值。
+dev_watch_ignored_dirs = ["backend", "data", "test-results", "frontend/tauri", "config"]
+# 三维渲染后端；auto 优先使用 WebGPU，失败自动回退原有 WebGL，webgl 可用于兼容性排障。
+preview_renderer = "auto"
+# WebGPU 模块加载与设备初始化的最长等待时间，单位为毫秒；超时直接回退 WebGL。
+preview_webgpu_init_timeout_ms = 8000
+# 整流罩被自身遮挡的轮廓使用虚线，实划的目标屏幕长度，单位像素。
+fairing_hidden_dash_px = 6.0
+# 整流罩隐藏轮廓虚线的目标间隔，单位像素；缩放视图时同步换算为模型长度。
+fairing_hidden_gap_px = 4.0
+# 整流罩边线遮挡射线排除自相交的容差，占罩体包围球半径的比例。
+fairing_edge_ray_epsilon_ratio = 0.000001
 # 三维交互期间使用的初始画布像素比。
 preview_interaction_pixel_ratio = 1.0
 # 三维交互期间允许自动降低到的最小画布像素比。
 preview_interaction_min_pixel_ratio = 0.65
 # 三维视图静止时使用的最大画布像素比。
 preview_idle_pixel_ratio_cap = 1.5
+# 后台预加载完成后，内存中最多保留的非当前场景模型数量；超过后复用后端已生成资源。
+preview_cache_model_limit = 5
+# 非当前场景的预览网格数组内存预算，单位字节；大模型超预算时不常驻内存。
+preview_cache_max_bytes = 1543503872
+# 卫星设置页模型搜索最多保留的最近使用记录数；按最近手动选择排序并去重，0 表示不记录。
+model_search_recent_limit = 2
+# 前置配置三维画布的最大像素比；越高越清晰，GPU 与显存开销也越大。
+pre_config_pixel_ratio_cap = 1.5
+# 数据管理三维画布的最大像素比；同时用于内嵌预览和放大窗口。
+data_management_pixel_ratio_cap = 1.5
+# 数据管理跨页面保留最近一条 GLB 字节的最大体积；超出时仍可预览，但不常驻缓存。
+data_management_cache_max_bytes = 234881024
 # 三维交互结束后恢复细节预览的等待时间，单位为毫秒。
 preview_idle_delay_ms = 180
 # 连续慢帧触发降低交互像素比的帧耗时阈值，单位为毫秒。
@@ -175,7 +674,156 @@ preview_fast_frame_ms = 14
 preview_envelope_color = 0x39d0e9
 # 安全包络半透明外壳的不透明度，范围为 0 至 1。
 preview_envelope_opacity = 0.22
+# 固定卫星世界坐标箭头的默认单次微调距离，单位毫米；用户可在面板临时调整。
+fixed_nudge_step_mm = 1.0
+# 固定约束中面对安装面顺逆时针旋转的单次角度，固定为四分之一圈；与位置步长、Excel 导出独立。
+fixed_mount_rotation_step_deg = 90.0
+# 固定卫星六向箭头从中心到箭头末端的目标屏幕长度，单位像素。
+fixed_gizmo_size_px = 80
+# 固定位置草稿停止变化后发起正式后端校验的等待时间，单位毫秒；拖动期间不发起预览请求。
+fixed_validation_debounce_ms = 160
 # 后台任务运行期间的前端状态轮询间隔，单位为毫秒。
 background_task_running_poll_interval_ms = 1000
 # 后台任务空闲或完成后的前端状态轮询间隔，单位为毫秒。
 background_task_idle_poll_interval_ms = 5000
+# 当前布局方案共享顶点、法向、索引与边线的总预算（字节）；不乘以实例数量。
+layout_mesh_geometry_max_bytes = 603979776
+# 单型号下载上限（字节），需不大于后端显示资源上限。
+layout_mesh_download_max_bytes = 67108864
+# 固定约束页预制包络二进制下载上限（字节）；固定页超过后可按实际内存回退旧 JSON 网格。
+fixed_display_download_max_bytes = 603979776
+# 旧 JSON 网格兜底预留的物理内存，单位字节；用于避免解析和 Worker 派生挤占系统空间。
+fixed_legacy_memory_reserve_bytes = 67108864
+# 旧 JSON 网格兜底最终几何最多占扣除预留后可用内存的比例。
+fixed_legacy_memory_fraction = 0.45
+# 旧 JSON 解析与 Worker 派生的合计估算工作集最多占扣除预留后可用内存的比例。
+fixed_legacy_worker_fraction = 0.70
+# JSON 响应长度折算为下载缓冲、文本和解析对象的保守内存倍数；此空间与几何派生预算分开扣除。
+fixed_legacy_json_memory_factor = 12
+# Worker 派生几何的保守工作集预算（字节），包括边线构建临时结构估计。
+layout_mesh_worker_max_bytes = 1275068416
+# 单型号 Worker 的最长处理时间（毫秒），超时终止并释放其内存。
+layout_mesh_worker_timeout_ms = 120000
+# 布局优化预览中固定卫星的包络填充色，RGB十六进制；与剩余优化卫星区分。
+layout_fixed_satellite_color = 0xf6b44b
+# 布局优化中非固定卫星及数据管理中固化包络的共用填充色，RGB十六进制。
+layout_optimized_satellite_color = 0x39d0e9
+# 人工微调中选中卫星的整体填充与轮廓颜色；组合内全部成员共同使用，RGB 十六进制。
+layout_refinement_selected_color = 0xffd43b
+# 人工微调自动取景时完整卫星与安装筒占画幅的目标比例，范围大于 0 且小于 1，剩余空间用于标签和边距。
+layout_refinement_view_fill_ratio = 0.86
+# 布局优化与数据管理预览共用的卫星包络填充不透明度，范围为0至1。
+layout_satellite_opacity = 0.82
+
+# 模型设置页的体素分辨率与内存建议，仅供展示，不参与资源限制或计算调度。
+[frontend.envelope_memory_recommendations]
+# 体素分辨率 500 对应的内存最低建议，单位 GB。
+500 = 8
+# 体素分辨率 1000 对应的内存最低建议，单位 GB。
+1000 = 16
+# 体素分辨率 1500 对应的内存最低建议，单位 GB。
+1500 = 32
+
+# 软件品牌图标；前端直接引用同一组 SVG，桌面和安装包由这些母版生成 ICO。
+[branding]
+# 标准图标母版，相对于项目根目录；调整路径时需同步前端静态资源引用。
+icon_svg = "frontend/assets/branding/sat-layout-opt.svg"
+# 小尺寸母版；保持外轮廓和配色，仅扩大星体分缝以适配浏览器标签和任务栏。
+small_icon_svg = "frontend/assets/branding/sat-layout-opt-small.svg"
+# 使用小尺寸母版的最大图标边长，单位为像素。
+small_icon_max_size = 32
+# Windows ICO 包含的方形帧边长，单位为像素；覆盖常见显示缩放与资源管理器尺寸。
+windows_icon_sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
+
+# 桌面安装版配置；开发启动仍使用上面的固定端口，桌面版使用本机动态端口避免冲突。
+[desktop]
+# 安装后的程序名称。
+title = "卫星配载工作台"
+# 桌面启动的默认页面。
+entry_path = "/frontend/model-upload"
+# 仅供历史 Electron 入口使用；当前 Tauri 安装版以程序根目录为数据路径基准，不读取此用户目录。
+user_data_dir = "SatLayoutOpt"
+# 桌面状态相对数据基准的目录，存放 WebView 资料、配置备份和启动状态；安装版位于安装目录内。
+state_dir = "data/desktop-state"
+# 窗口初始宽度，单位为像素。
+width = 1440
+# 窗口初始高度，单位为像素。
+height = 900
+# 窗口最小宽度，单位为像素。
+min_width = 960
+# 窗口最小高度，单位为像素。
+min_height = 640
+# 原生窗口与 WebView 绘制前的统一底色，按 RGBA 字节配置；不透明底色与默认亮色页面一致，减少缩放时黑底闪烁。
+background_color = [242, 246, 250, 255]
+# 后端启动等待时间，单位为毫秒。
+startup_timeout_ms = 90000
+# 退出时等待后台释放资源的时间，单位为毫秒。
+shutdown_timeout_ms = 8000
+# 检测桌面退出通知和父进程管道断开的间隔，单位为毫秒。
+control_poll_interval_ms = 200
+
+# Tauri 桌面壳；Rust 后端管理业务与任务，独立 Python 进程负责几何和数值计算。
+[desktop.tauri]
+# Windows 应用标识，用于窗口与单实例管理。
+identifier = "com.satlayoutopt.desktop"
+# 开发桌面数据根目录，与浏览器开发数据及已安装 Electron 数据隔离。
+data_dir = "data/desktop/tauri"
+# Cargo 产物和 Tauri 派生配置目录；仅保存可重新生成的构建文件。
+build_dir = "data/build/tauri"
+# Rustup 与 Cargo 的相对安装目录，均相对于指定 Conda 环境。
+rustup_dir = "Tools/rustup"
+cargo_dir = "Tools/cargo"
+# Windows C++ 编译工具目录，相对于指定 Conda 环境。
+msvc_dir = "Tools/VSBuildTools"
+# Rust 首次编译并行任务数，限制构建峰值内存。
+build_jobs = 4
+# 本机代理建立上游连接的时限，单位毫秒；计算响应本身不设短超时。
+connect_timeout_ms = 2000
+# 本机页面的内容安全策略；资源和 API 同源，允许 Three.js 的 Blob 与内联样式。
+csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+# Windows 安装包构建参数，构建产物和下载缓存均在被 Git 忽略的 data 目录。
+[packaging]
+# 安装包版本号。
+version = "0.4.0"
+# 构建时必须使用的项目 Conda 环境。
+python_environment = "D:/Conda_envs/payload-opt"
+# 一键打包入口调用的 Conda 可执行文件；启动路径使用正斜杠。
+conda_executable = "D:/soft/anaconda/Scripts/conda.exe"
+# 安装包与可直接启动目录的输出位置，相对于项目根目录。
+output_dir = "data/releases"
+# WebView2 下载与解压缓存，必须位于项目 data/build 的独立子目录；有效缓存复用，失效和旧版本先清理再生成。
+cache_dir = "data/build/installer-cache"
+# Inno Setup 编译器位置，支持环境变量展开。
+inno_compiler = "%LOCALAPPDATA%/Programs/Inno Setup 6/ISCC.exe"
+# Nuitka 缓存目录，必须位于项目 data/build 的独立子目录；仅保留当前输入的有效缓存，C 源码和报告不分发。
+nuitka_build_dir = "data/build/nuitka"
+# Nuitka 并行 C 编译任务数量，按构建机器内存调整。
+nuitka_jobs = 4
+# Windows C 编译器选择：auto、mingw64 或 msvc。
+nuitka_compiler = "mingw64"
+# 允许 Nuitka 下载官方提供的编译器及依赖分析工具；Python 包仍只安装在指定 Conda 环境。
+nuitka_allow_downloads = true
+# 整条打包流程的互斥锁目录；必须位于项目 data/build 的独立子目录。
+pipeline_dir = "data/build/packaging"
+# 无新工具输出时，在命令窗口刷新当前步骤和已用时间的间隔，单位秒；打包输出不写阶段日志。
+progress_interval_seconds = 5
+# 单个编译命令最长运行时间，单位秒；错误直接显示在命令窗口。
+build_timeout_seconds = 21600
+# 单个安装或业务验收命令最长运行时间，单位秒。
+validation_timeout_seconds = 1800
+# Windows 10/11 自带的系统 DLL；除此以外的缺失库必须从包内或指定 Conda 环境解析。
+native_system_dlls = ["advapi32.dll", "bcrypt.dll", "bcryptprimitives.dll", "crypt32.dll", "d3d11.dll", "dbghelp.dll", "dxgi.dll", "gdi32.dll", "iphlpapi.dll", "kernel32.dll", "msvcrt.dll", "ntdll.dll", "ole32.dll", "oleacc.dll", "oleaut32.dll", "opengl32.dll", "pdh.dll", "powrprof.dll", "propsys.dll", "psapi.dll", "rpcrt4.dll", "secur32.dll", "shell32.dll", "shlwapi.dll", "urlmon.dll", "user32.dll", "userenv.dll", "version.dll", "wevtapi.dll", "winmm.dll", "ws2_32.dll", "wsock32.dll"]
+# 通过运行时加载且未出现在 PE 导入表中的额外 DLL 名称；wheel 自带动态库另行保留。
+native_dynamic_dlls = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"]
+# 不分发未使用且依赖外部授权或独立安装的 CasADi 可选插件；核心 CAD/布局不调用这些求解器。
+# 若未来启用对应能力，先安装其运行库并移除对应排除项；其他包内 PE 引用排除项时构建会失败。
+native_excluded_dlls = ["casadi/libcasadi_conic_xpress.dll", "casadi/libcasadi_nlpsol_knitro.dll", "casadi/libcasadi_linsol_ma27.dll", "casadi/libcasadi_nlpsol_ccopt.dll", "casadi/libcasadi_nlpsol_madnlp.dll", "casadi/libcasadi_nlpsol_snopt.dll", "casadi/libcasadi_nlpsol_worhp.dll", "casadi/libmatlab_ipc.dll"]
+# 随离线安装包分发的 WebView2 固定运行时目录，相对于安装根目录。
+webview2_dir = "runtime/webview2"
+# 固定运行时版本；更新此项时同步 URL、摘要并重新验收原生窗口。
+webview2_version = "154.0.4258.62"
+# 微软官方固定版本 x64 CAB 地址；只在构建时下载，安装和使用均不联网。
+webview2_download_url = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/b92cd7d9-6976-4f34-9708-47e80937c287/Microsoft.WebView2.FixedVersionRuntime.154.0.4258.62.x64.cab"
+# 官方 CAB 的固定 SHA256；首次获取另核验微软 Authenticode 签名，之后按此摘要校验缓存。
+webview2_sha256 = "e8f55a4bde27c7f82512402b56a58539b5ec8928be4e500e077b6f66c9ef4668"

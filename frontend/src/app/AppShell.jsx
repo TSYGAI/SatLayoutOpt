@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
 import { PAGE_ROUTES } from '../../page-routes.mjs';
+import brandIcon from '../../assets/branding/sat-layout-opt-small.svg';
 import { restorePagePosition, savePagePosition } from './page-position-cache.js';
 import { applyTheme, getInitialTheme } from '../theme/theme.js';
 
@@ -36,7 +37,7 @@ function ThemeToggle() {
 
     /** 将其他标签页的持久化主题同步到当前页面。 */
     function handleStorage(event) {
-      if (event.key === 'sat-layout-opt-theme') setTheme(applyTheme(event.newValue || 'dark'));
+      if (event.key === 'sat-layout-opt-theme') setTheme(applyTheme(event.newValue || 'light'));
     }
 
     window.addEventListener('sat-layout-theme-change', handleThemeChange);
@@ -118,7 +119,7 @@ export function AppShell({
     <div className={shellClassName} data-scroll-position-key="app-shell">
       <header className="topbar">
         <div className="brand" aria-label="卫星配载工作台">
-          <div className="brand-mark"><i /><i /><i /></div>
+          <img className="brand-mark" src={brandIcon} width="31" height="31" alt="" aria-hidden="true" />
           <div><strong>卫星配载工作台</strong></div>
         </div>
         <nav className="page-nav" aria-label="页面导航">

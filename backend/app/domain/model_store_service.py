@@ -1,6 +1,6 @@
 """
 文件说明：把已上传模型及其唯一 0 度基础包络固化为可长期查阅的存储记录。
-本模块编排模型服务与 SQLite 固化存储，负责校验包络有效性、组装元数据、暂存资源并提交记录，不处理 HTTP。
+本模块编排模型服务与 SQLite 固化存储，负责单个快照与全部模型逐项固化、资源暂存和结果汇总，不处理 HTTP。
 固化是单向快照：只读取模型与包络产物，不回写、迁移或删除它们的任何内容。
 """
 
@@ -10,6 +10,7 @@ from contextlib import ExitStack
 import hashlib
 from pathlib import Path
 import shutil
+import sqlite3
 from threading import RLock
 import numpy as np
 
@@ -73,6 +74,26 @@ class ModelStoreService:
                 if current.get("state") != "ready":
                     raise EnvelopeNotReadyError(str(error)) from error
                 raise ValueError(f"包络产物无法读取，请重新生成包络：{error}") from error
+
+    def save_all_model_snapshots(self) -> dict:
+        """固定全部上传模型列表并逐项固化，返回成功记录和失败原因；空列表抛出 ModelStoreError。
+
+        各模型沿用已保存设置和单个固化校验，成功项独立提交，失败不回滚其他完整快照。
+        """
+        models = self.model_service.list_models()
+        if not models:
+            raise ModelStoreError("没有可存储的已上传模型")
+        results = []
+        for model in models:
+            item = {"id": model["id"], "filename": model["filename"]}
+            try:
+                record = self.save_model_snapshot(model["id"])
+                item.update(status="stored", record=record)
+            except (LookupError, ModelStoreError, EnvelopeNotReadyError, ValueError, OSError, sqlite3.Error) as error:
+                item.update(status="failed", error=str(error))
+            results.append(item)
+        stored = sum(item["status"] == "stored" for item in results)
+        return {"total": len(results), "stored": stored, "failed": len(results) - stored, "results": results}
 
     def _persist_snapshot(self, snapshot: dict, record_name: str | None) -> dict:
         """在模型与包络均未变化的前提下，暂存资源并提交固化记录。"""

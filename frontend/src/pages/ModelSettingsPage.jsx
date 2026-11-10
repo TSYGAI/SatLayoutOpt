@@ -1,12 +1,16 @@
 /**
- * 文件说明：卫星设置功能页，复用模型上传页的三维预览并提供独立的左侧设置栏边界。
- * 本页保存含曲面点击点、固定/自由向上轴的模型设置和六向包络增量，并通过 API 生成包络。
+ * 文件说明：卫星设置功能页，先显示设置栏，再异步挂载共享三维预览并复用现有缓存。
+ * 按模型保存参数与草稿；模型入口采用独立常驻搜索控件，候选和选择由共享预览控制器同步。
+ * 生成与存储共用范围并保护并发提交，静态结果并排显示；全部生成按任务 ID 显示模型名，全部存储列明逐项结果。
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Boxes, ChevronDown, Crosshair, Database, LoaderCircle } from 'lucide-react';
+import { formatParameterNumber } from '../utils/number-format.js';
+import { ParameterNumberInput } from '../components/ParameterNumberInput.jsx';
+import { Box, Crosshair, LoaderCircle } from '../components/icons.js';
 
 import { AppShell } from '../app/AppShell.jsx';
+import { readPageSession, usePageSessionState, writePageSession } from '../app/page-session-state.js';
 import { ModelPreviewPanel } from '../components/ModelPreviewPanel.jsx';
 import { SettingsSelect } from '../components/SettingsSelect.jsx';
 import { showToast } from '../components/toast.js';
@@ -15,6 +19,7 @@ import {
   getLatestEnvelopeGenerationTask,
   getModelStorageState,
   saveModelSnapshot,
+  saveAllModelSnapshots,
   startAllModelEnvelopeGeneration,
   startModelEnvelopeGeneration,
   updateModelSettings,
@@ -23,11 +28,11 @@ import {
   applyCurrentModelPreviewSettings,
   mountModelSettingsPage,
   setInstallationFacePicking,
-} from './model-upload/model-upload-page.js';
+} from './model-upload/model-preview-loader.js';
 import {
   INSTALLATION_FACE_SELECTED_EVENT,
   INSTALLATION_PICKER_STATE_EVENT,
-} from './model-settings/model-setting-preview-tools.js';
+} from './model-settings/model-preview-events.js';
 import {
   areModelSettingsEqual,
   buildModelSettingsPayload,
@@ -39,9 +44,18 @@ import '../../styles/model-upload.css';
 import '../../styles/model-settings.css';
 import { useModelEnvelopePreview } from './model-settings/use-model-envelope-preview.js';
 import { ModelSafetyClearanceSection } from './model-settings/ModelSafetyClearanceSection.jsx';
+import { ModelEnvelopeSettingsSection } from './model-settings/ModelEnvelopeSettingsSection.jsx';
+import { ModelEnvelopeProgress } from './model-settings/ModelEnvelopeProgress.jsx';
+import { ModelSettingsActions, ModelStorageBatchResult } from './model-settings/ModelSettingsActions.jsx';
+import { CoordinateFrameSection } from './model-settings/CoordinateFrameSection.jsx';
+import { ModelSearchSelect } from './model-settings/ModelSearchSelect.jsx';
+import { coordinateScale, scaledCoordinate } from './model-settings/scaled-coordinates.js';
+import { getModelStorageIssues } from './model-settings/model-storage-state.js';
+import '../../styles/coordinate-frame.css';
 import {
   getEnvelopeTaskAction,
   getEnvelopeTaskModelStatus,
+  getEnvelopeTaskProgress,
 } from './model-settings/model-envelope-task-state.js';
 
 const EMPTY_SETTINGS = Object.freeze(normalizeModelSettings());
@@ -64,9 +78,7 @@ function formatInstallationArea(face, settings) {
   const scale = Number(settings.model_scale);
   if (!Number.isFinite(area) || !Number.isFinite(scale)) return '--';
   const transformedArea = area * scale * scale;
-  const text = transformedArea === 0
-    ? '0'
-    : transformedArea.toLocaleString('zh-CN', { maximumSignificantDigits: 6 });
+  const text = formatParameterNumber(transformedArea);
   return `${text} ${settings.model_unit}²`;
 }
 
@@ -78,18 +90,31 @@ function formatInstallationSurfaceType(value) {
 
 /** 渲染卫星设置页面。 */
 export function ModelSettingsPage() {
+  const [previewStartup, setPreviewStartup] = useState({ status: 'loading', message: '' });
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [selectedModel, setSelectedModel] = useState(null);
+  const [modelSummaries, setModelSummaries] = useState([]);
   const [settings, setSettings] = useState({ ...EMPTY_SETTINGS });
   const [savedSettings, setSavedSettings] = useState(null);
   const [pickerState, setPickerState] = useState({ status: 'unavailable', message: '等待高清预览与 STEP 面映射', invalidSelection: false });
   const [installationFace, setInstallationFace] = useState(null);
   const [envelopeState, setEnvelopeState] = useState({ state: 'pending' });
   const [envelopeAction, setEnvelopeAction] = useState(null);
+  const [envelopeTask, setEnvelopeTask] = useState(null);
+  const [envelopeSubmission, setEnvelopeSubmission] = useState(null);
   const [storeState, setStoreState] = useState({ ...EMPTY_STORE_STATE });
   const [storeAction, setStoreAction] = useState(null);
+  const [storeFailure, setStoreFailure] = useState(null);
+  const [actionScope, setActionScope] = usePageSessionState('model-settings', 'action-scope', 'single');
+  const [storeBatchResult, setStoreBatchResult] = useState(null);
+  const [storeRevision, setStoreRevision] = useState(0);
+  const storeSubmissionRef = useRef(null);
+  const [coordinateEditing, setCoordinateEditing] = useState(false);
   const saveControllerRef = useRef(null);
   const storeControllerRef = useRef(null);
   const envelopeTaskRef = useRef(null);
+  const envelopeSubmissionRef = useRef(null);
+  const envelopeTaskVersionRef = useRef(0);
   const envelopeTaskRefreshRef = useRef(null);
   const envelopeTaskNoticeRef = useRef(null);
   const mountedRef = useRef(true);
@@ -100,26 +125,45 @@ export function ModelSettingsPage() {
   const savedSettingsRef = useRef(null);
   const selectedModelIdRef = useRef(null);
   const latestSettingsRef = useRef({ ...EMPTY_SETTINGS });
+  const activeEnvelopeAction = envelopeSubmission?.kind || envelopeAction;
+  const currentEnvelopeSubmission = envelopeSubmission?.modelId === selectedModel?.id ? envelopeSubmission : null;
+  const currentEnvelopeAction = currentEnvelopeSubmission?.kind
+    || (envelopeAction === 'all' || envelopeTaskRef.current?.model_id === selectedModel?.id ? envelopeAction : null);
+  const envelopeProgress = getEnvelopeTaskProgress(envelopeTask, selectedModel?.id, envelopeSubmission, modelSummaries);
   const envelopePreview = useModelEnvelopePreview({
-    modelId: selectedModel?.id, envelope: envelopeState, settings,
-    hasDraft: !savedSettings || !areModelSettingsEqual(settings, savedSettings),
+    modelId: selectedModel?.id, envelope: coordinateEditing ? { state: 'pending' } : envelopeState, settings, savedSettings,
   });
+
+  /** 切换模型后清除上一次存储提示；同模型内保留到下次尝试，避免自动保存响应提前清除缺项。 */
+  useEffect(() => { setStoreFailure(null); }, [selectedModel?.id]);
+
+  /** 保存当前模型的草稿与保存基线；离页和切模型时调用，取消请求不撤销用户输入。 */
+  function rememberSettingsDraft() {
+    if (selectedModelIdRef.current) writePageSession('model-settings-drafts', selectedModelIdRef.current, {
+      settings: latestSettingsRef.current, saved: savedSettingsRef.current,
+    });
+  }
 
   useEffect(() => {
     mountedRef.current = true;
-    /** 接收预览控制器发出的当前模型及后端设置。 */
+    /** 接收当前模型、后端设置及全库名称摘要，按实际计算模型显示批量进度。 */
     function handleModelSelection(event) {
+      rememberSettingsDraft();
       saveControllerRef.current?.abort();
       saveControllerRef.current = null;
       saveVersionRef.current += 1;
       const model = event.detail?.model || null;
+      setModelSummaries(event.detail?.models || []);
       const nextSettings = normalizeModelSettings(model?.settings);
+      const draft = model ? readPageSession('model-settings-drafts', model.id) : null;
+      const restoredSettings = draft && !areModelSettingsEqual(draft.settings, draft.saved) ? draft.settings : nextSettings;
       selectedModelRef.current = model;
       savedSettingsRef.current = model ? nextSettings : null;
       selectedModelIdRef.current = model?.id || null;
-      latestSettingsRef.current = nextSettings;
+      latestSettingsRef.current = restoredSettings;
       setSelectedModel(model);
-      setSettings(nextSettings);
+      setCoordinateEditing(false);
+      setSettings(restoredSettings);
       setSavedSettings(model ? nextSettings : null);
       setInstallationFace(null);
       const task = envelopeTaskRef.current;
@@ -158,10 +202,12 @@ export function ModelSettingsPage() {
     window.addEventListener(MODEL_SETTINGS_SELECTION_EVENT, handleModelSelection);
     window.addEventListener(INSTALLATION_PICKER_STATE_EVENT, handlePickerState);
     window.addEventListener(INSTALLATION_FACE_SELECTED_EVENT, handleInstallationFaceSelected);
-    const unmountPreview = mountModelSettingsPage();
+    const unmountPreview = mountModelSettingsPage(setPreviewStartup);
     return () => {
+      rememberSettingsDraft();
       saveControllerRef.current?.abort();
       mountedRef.current = false;
+      envelopeSubmissionRef.current = null;
       saveVersionRef.current += 1;
       selectedModelRef.current = null;
       savedSettingsRef.current = null;
@@ -170,13 +216,16 @@ export function ModelSettingsPage() {
       window.removeEventListener(INSTALLATION_FACE_SELECTED_EVENT, handleInstallationFaceSelected);
       unmountPreview();
     };
-  }, []);
+  }, [previewAttempt]);
 
   /** 把后端最新任务快照应用到当前页面，不影响正在执行的后端任务。 */
   function applyEnvelopeTask(task, { notify = false } = {}) {
+    envelopeTaskVersionRef.current += 1;
     envelopeTaskRef.current = task;
+    setEnvelopeTask(task);
     const action = getEnvelopeTaskAction(task);
     setEnvelopeAction(action);
+    if (action) setActionScope(action);
     if (task?.state === 'running' && task.id) envelopeTaskNoticeRef.current = task.id;
     if (task?.state === 'succeeded' && task.kind === 'single' && task.model_id) {
       const completed = getEnvelopeTaskModelStatus(task, task.model_id);
@@ -214,6 +263,7 @@ export function ModelSettingsPage() {
     let idlePollIntervalMs = 5000;
     /** 查询一次后端最新任务；组件卸载只停止查询，不发送取消请求。 */
     async function refreshEnvelopeTask() {
+      const version = envelopeTaskVersionRef.current;
       if (timer !== null) window.clearTimeout(timer);
       timer = null;
       let nextDelay = idlePollIntervalMs;
@@ -225,7 +275,9 @@ export function ModelSettingsPage() {
         runningPollIntervalMs = polling.runningPollIntervalMs;
         idlePollIntervalMs = polling.idlePollIntervalMs;
         nextDelay = task?.state === 'running' ? runningPollIntervalMs : idlePollIntervalMs;
-        if (!disposed && mountedRef.current) applyEnvelopeTask(task, { notify: true });
+        if (!disposed && mountedRef.current && version === envelopeTaskVersionRef.current) {
+          applyEnvelopeTask(task, { notify: true });
+        }
       } catch (error) {
         if (!disposed && error.name !== 'AbortError') showToast(`包络任务状态读取失败：${error.message}`, true);
       } finally {
@@ -263,9 +315,9 @@ export function ModelSettingsPage() {
         setStoreState({ loading: false, record: null, record_count: 0 });
       });
     return () => controller.abort();
-  }, [selectedModel?.id, envelopeState.state, envelopeState.generated_at]);
+  }, [selectedModel?.id, envelopeState.state, envelopeState.generated_at, storeRevision]);
 
-  /** 在输入失焦或即时选择后串行保存当前完整设置，避免旧请求覆盖新草稿。 */
+  /** 串行保存完整设置并隔离旧响应；options 可携带坐标编辑基线及对应的失败提示名称。 */
   function requestSave(nextSettings = latestSettingsRef.current, options = {}) {
     const model = selectedModelRef.current;
     if (!model) return Promise.resolve(false);
@@ -287,7 +339,7 @@ export function ModelSettingsPage() {
       const controller = new AbortController();
       saveControllerRef.current = controller;
       try {
-        const response = await updateModelSettings(savingModelId, payload, controller.signal);
+        const response = await updateModelSettings(savingModelId, payload, controller.signal, options.expectedSettings);
         const saved = normalizeModelSettings(response.settings);
         if (controller.signal.aborted || selectedModelIdRef.current !== savingModelId
           || version !== saveVersionRef.current || !areModelSettingsEqual(latestSettingsRef.current, payload)) return false;
@@ -303,7 +355,7 @@ export function ModelSettingsPage() {
         }
         return true;
       } catch (error) {
-        if (error.name !== 'AbortError') showToast(`自动保存失败：${error.message}`, true);
+        if (error.name !== 'AbortError') showToast(`${options.failureLabel || '自动保存失败'}：${error.message}`, true);
         return false;
       } finally {
         if (saveControllerRef.current === controller) saveControllerRef.current = null;
@@ -321,6 +373,7 @@ export function ModelSettingsPage() {
     settings.rotation_x,
     settings.rotation_y,
     settings.rotation_z,
+    settings.coordinate_frame,
     settings.center_of_mass?.x,
     settings.center_of_mass?.y,
     settings.center_of_mass?.z,
@@ -337,14 +390,47 @@ export function ModelSettingsPage() {
     setSettings(nextSettings);
   }
 
+  /** 在独立坐标编辑前完成已有自动保存，锁定其他模型参数。 */
+  async function beginCoordinateEdit() {
+    const id = selectedModelIdRef.current;
+    setCoordinateEditing(true);
+    await saveQueueRef.current;
+    if (!mountedRef.current || selectedModelIdRef.current !== id) return null;
+    const saved = await requestSave();
+    if (!mountedRef.current || selectedModelIdRef.current !== id) return null;
+    if (!saved) { setCoordinateEditing(false); return null; }
+    await setInstallationFacePicking(false);
+    if (!mountedRef.current || selectedModelIdRef.current !== id) return null;
+    return latestSettingsRef.current;
+  }
+
+  /** 仅确认时提交坐标定义；质心数值和安装几何绑定保持原值，失败恢复保存基线。 */
+  async function commitCoordinateFrame(coordinate_frame) {
+    const id = selectedModelIdRef.current;
+    const previous = latestSettingsRef.current;
+    const next = { ...previous, coordinate_frame };
+    latestSettingsRef.current = next;
+    const success = await requestSave(next, {
+      expectedSettings: buildModelSettingsPayload(savedSettingsRef.current), failureLabel: '坐标系保存失败',
+    });
+    if (!success && selectedModelIdRef.current === id) latestSettingsRef.current = previous;
+    return success;
+  }
+
   /** 更新单个方向的距离草稿，保留其余五向数值，保存由失焦事件触发。 */
   function updateSafetyClearance(direction, value) {
     updateField('safety_clearance_mm', { ...latestSettingsRef.current.safety_clearance_mm, [direction]: value });
   }
 
-  /** 更新一个质心坐标，并在三轴全部清空时恢复未设置状态。 */
+  /** 更新当前模型的体素分辨率草稿；失焦保存后旧包络由后端判定失效。 */
+  function updateEnvelopeResolution(value) {
+    updateField('envelope_settings', { ...latestSettingsRef.current.envelope_settings, refinement_grid_size: value });
+  }
+
+  /** 把缩放后的质心输入还原为接口坐标；几何与布局只应用一次比例，三轴清空仍为未设置。 */
   function updateCenterOfMass(axis, value) {
-    const nextCenter = { x: '', y: '', z: '', ...(latestSettingsRef.current.center_of_mass || {}), [axis]: value };
+    const coordinate = scaledCoordinate(value, 1 / coordinateScale(latestSettingsRef.current.model_scale));
+    const nextCenter = { x: '', y: '', z: '', ...(latestSettingsRef.current.center_of_mass || {}), [axis]: coordinate };
     const centerOfMass = Object.values(nextCenter).every((coordinate) => coordinate === '') ? null : nextCenter;
     const nextSettings = { ...latestSettingsRef.current, center_of_mass: centerOfMass };
     latestSettingsRef.current = nextSettings;
@@ -366,61 +452,100 @@ export function ModelSettingsPage() {
     requestSave(nextSettings);
   }
 
-  /** 保存当前草稿后生成所选模型唯一的 0 度基础正式包络。 */
-  async function handleGenerateEnvelope() {
+  /**
+   * 立即锁定生成入口并显示准备反馈；复用失焦保存，在最新草稿确认保存后提交单模型或全部任务。
+   * 保存失败、切换模型或离页时停止尚未提交的操作；已提交的后台任务仍由服务端独立执行。
+   */
+  async function submitEnvelopeGeneration(kind) {
     const modelId = selectedModelIdRef.current;
-    if (!modelId || envelopeAction) return;
-    if (!await requestSave()) return;
-    setEnvelopeAction('single');
-    setEnvelopeState({ state: 'generating' });
+    if (!modelId || coordinateEditing || storeSubmissionRef.current || envelopeAction || envelopeSubmissionRef.current) return;
+    const submission = { modelId, kind };
+    envelopeSubmissionRef.current = submission;
+    envelopeTaskVersionRef.current += 1;
+    setEnvelopeSubmission(submission);
+
+    /** 只允许仍在当前页面、当前模型上的同一次准备操作发起生成请求。 */
+    function isCurrentSubmission() {
+      return mountedRef.current && envelopeSubmissionRef.current === submission
+        && selectedModelIdRef.current === modelId;
+    }
+
     try {
-      const task = await startModelEnvelopeGeneration(modelId);
-      if (mountedRef.current) {
+      await saveQueueRef.current;
+      if (!isCurrentSubmission() || !await requestSave() || !isCurrentSubmission()) return;
+      const task = await (kind === 'single' ? startModelEnvelopeGeneration(modelId) : startAllModelEnvelopeGeneration());
+      if (mountedRef.current && envelopeSubmissionRef.current === submission) {
         applyEnvelopeTask(task);
         void envelopeTaskRefreshRef.current?.();
       }
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || envelopeSubmissionRef.current !== submission) return;
       setEnvelopeAction(null);
-      setEnvelopeState({ state: 'error', message: error.message });
-      showToast(`包络生成失败：${error.message}`, true);
-    }
-  }
-
-  /** 保存当前草稿后生成模型库全部包络，并同步所选模型的结果状态。 */
-  async function handleGenerateAllEnvelopes() {
-    if (envelopeAction || !selectedModelIdRef.current) return;
-    if (!await requestSave()) return;
-    setEnvelopeAction('all');
-    setEnvelopeState({ state: 'generating-all' });
-    try {
-      const task = await startAllModelEnvelopeGeneration();
-      if (mountedRef.current) {
-        applyEnvelopeTask(task);
-        void envelopeTaskRefreshRef.current?.();
+      if (selectedModelIdRef.current === modelId) setEnvelopeState({ state: 'error', message: error.message });
+      showToast(`${kind === 'all' ? '全部包络' : '包络'}生成失败：${error.message}`, true);
+    } finally {
+      if (envelopeSubmissionRef.current === submission) {
+        envelopeSubmissionRef.current = null;
+        if (mountedRef.current) setEnvelopeSubmission(null);
       }
-    } catch (error) {
-      if (!mountedRef.current) return;
-      setEnvelopeAction(null);
-      setEnvelopeState({ state: 'error', message: error.message });
-      showToast(`全部包络生成失败：${error.message}`, true);
     }
   }
 
-  /** 保存当前草稿后，把模型、STEP 原件与正式包络固化到本地 SQLite 数据库。 */
+  /** 按共享范围生成当前模型或全部模型的包络，准备和提交统一由生成流程管理。 */
+  function handleGenerateEnvelope() {
+    return submitEnvelopeGeneration(actionScope);
+  }
+
+  /** 同时改变生成和存储的范围；已有操作期间拒绝切换，切换本身不发起业务请求。 */
+  function handleActionScopeChange(scope) {
+    if (coordinateEditing || storeSubmissionRef.current || activeEnvelopeAction) return;
+    setActionScope(scope);
+    setStoreFailure(null);
+    setStoreBatchResult(null);
+  }
+
+  /** 先保存当前草稿再按范围固化；单个结果按模型隔离，全部结果跨模型展示，后端逐项校验正式资源。 */
   async function handleStoreModel() {
     const modelId = selectedModelIdRef.current;
-    if (!modelId || storeAction || envelopeAction) return;
-    if (!await requestSave()) return;
+    if (!modelId || coordinateEditing || storeSubmissionRef.current || envelopeAction || envelopeSubmissionRef.current) return;
+    const kind = actionScope;
+    const submission = { modelId, kind };
+    storeSubmissionRef.current = submission;
     setStoreAction('saving');
+    setStoreFailure(null);
+    setStoreBatchResult(null);
+    /** 当前存储请求只更新发起时的模型，保存等待期间切换页面或模型即停止后续提交。 */
+    function isCurrentSubmission() {
+      return mountedRef.current && selectedModelIdRef.current === modelId && storeSubmissionRef.current === submission;
+    }
     try {
+      if (kind === 'single') {
+        const issues = getModelStorageIssues(latestSettingsRef.current, envelopeState, savedSettingsRef.current);
+        if (issues.length) throw new Error(`请补充以下设置：${issues.join('；')}`);
+      }
+      await saveQueueRef.current;
+      if (!isCurrentSubmission() || !await requestSave() || !isCurrentSubmission()) return;
+      if (kind === 'all') {
+        const result = await saveAllModelSnapshots();
+        if (!mountedRef.current || storeSubmissionRef.current !== submission) return;
+        setStoreBatchResult(result);
+        setStoreRevision((revision) => revision + 1);
+        showToast(`全部存储完成：${result.stored} 个成功，${result.failed} 个失败`, result.failed > 0);
+        return;
+      }
       const record = await saveModelSnapshot(modelId, latestSettingsRef.current.device_name);
-      if (!mountedRef.current) return;
-      setStoreState({ loading: false, record, record_count: (storeState.record_count || 0) + 1 });
+      if (!isCurrentSubmission()) return;
+      storeControllerRef.current?.abort();
+      setStoreState((current) => ({ loading: false, record, record_count: (current.record_count || 0) + 1 }));
       showToast(`已存储到数据库 · ${record.device_name} · 基础包络`);
     } catch (error) {
-      if (mountedRef.current) showToast(`存储到数据库失败：${error.message}`, true);
+      if (isCurrentSubmission() || kind === 'all' && mountedRef.current && storeSubmissionRef.current === submission) {
+        const message = `无法存储到数据库：${error.message}`;
+        setStoreFailure(message);
+        showToast(message, true);
+      }
     } finally {
+      if (storeSubmissionRef.current === submission) storeSubmissionRef.current = null;
       if (mountedRef.current) setStoreAction(null);
     }
   }
@@ -433,33 +558,14 @@ export function ModelSettingsPage() {
             <section className="model-settings-model-section" aria-labelledby="model-settings-model-title">
               <div className="section-heading">
                 <div>
-                  <p>预览对象</p>
                   <h2 id="model-settings-model-title">选择模型</h2>
                 </div>
               </div>
-              <div className="model-settings-select-field">
-                <span id="model-settings-model-select-label">已上传模型</span>
-                <span className="model-settings-select-control">
-                  <button
-                    id="model-settings-model-select"
-                    className="model-settings-select-trigger"
-                    type="button"
-                    aria-labelledby="model-settings-model-select-label model-settings-model-select-value"
-                    aria-haspopup="listbox"
-                    aria-expanded="false"
-                    aria-controls="model-settings-model-options"
-                    disabled
-                  >
-                    <span aria-hidden="true" />
-                    <span id="model-settings-model-select-value">正在读取模型库</span>
-                    <ChevronDown aria-hidden="true" />
-                  </button>
-                  <div id="model-settings-model-options" className="model-settings-model-options" role="listbox" aria-label="已上传模型" hidden />
-                </span>
-              </div>
+              <ModelSearchSelect />
             </section>
 
             <div className="model-settings-form" aria-label="模型参数表单">
+              <fieldset className="model-settings-fields" disabled={coordinateEditing || Boolean(storeAction)}>
               <section className="model-settings-form-section" aria-labelledby="device-parameters-title">
                 <div className="model-settings-section-heading">
                   <h2 id="device-parameters-title">设备参数</h2>
@@ -480,10 +586,9 @@ export function ModelSettingsPage() {
                     />
                   </label>
                   <label className="model-settings-field" htmlFor="device-mass">
-                    <span>质量 <small>kg</small></span>
-                    <input
+                    <span>质量 <small>(kg)</small></span>
+                    <ParameterNumberInput
                       id="device-mass"
-                      type="number"
                       min="0"
                       max="1000000000000"
                       step="any"
@@ -496,6 +601,11 @@ export function ModelSettingsPage() {
                   </label>
                 </div>
               </section>
+              </fieldset>
+              <CoordinateFrameSection key={selectedModel?.id || 'empty'} modelId={selectedModel?.id}
+                frame={settings.coordinate_frame} unit={settings.model_unit} scale={settings.model_scale} disabled={Boolean(envelopeAction || storeAction)}
+                onBegin={beginCoordinateEdit} onCommit={commitCoordinateFrame} onEnd={() => setCoordinateEditing(false)} />
+              <fieldset className="model-settings-fields" disabled={coordinateEditing || Boolean(storeAction)}>
 
               <section className="model-settings-form-section" aria-labelledby="model-parameters-title">
                 <div className="model-settings-section-heading">
@@ -504,9 +614,8 @@ export function ModelSettingsPage() {
                 <div className="model-settings-field-grid">
                   <label className="model-settings-field" htmlFor="model-scale">
                     <span>模型比例</span>
-                    <input
+                    <ParameterNumberInput
                       id="model-scale"
-                      type="number"
                       min="0.0001"
                       max="1000000"
                       step="any"
@@ -548,11 +657,10 @@ export function ModelSettingsPage() {
                   {['x', 'y', 'z'].map((axis) => (
                     <label key={axis} className="model-settings-center-input" htmlFor={`center-of-mass-${axis}`}>
                       <span className="model-settings-center-axis" aria-hidden="true">{axis.toUpperCase()}</span>
-                      <input
+                      <ParameterNumberInput
                         id={`center-of-mass-${axis}`}
-                        type="number"
                         step="any"
-                        value={settings.center_of_mass?.[axis] ?? ''}
+                        value={scaledCoordinate(settings.center_of_mass?.[axis], coordinateScale(settings.model_scale))}
                         disabled={!selectedModel}
                         placeholder="--"
                         onChange={(event) => updateCenterOfMass(axis, event.target.value)}
@@ -562,6 +670,13 @@ export function ModelSettingsPage() {
                   ))}
                 </div>
               </section>
+
+              <ModelEnvelopeSettingsSection
+                values={settings.envelope_settings}
+                disabled={!selectedModel}
+                onChange={updateEnvelopeResolution}
+                onBlur={() => requestSave()}
+              />
 
               <ModelSafetyClearanceSection
                 values={settings.safety_clearance_mm}
@@ -608,70 +723,54 @@ export function ModelSettingsPage() {
                     </small>
                   </div>
                 </div>
-                <div className="model-settings-envelope-actions" aria-label="包络生成操作">
-                  <button
-                    type="button"
-                    disabled={!selectedModel || envelopeAction !== null}
-                    onClick={handleGenerateEnvelope}
-                  >
-                    {envelopeAction === 'single'
-                      ? <LoaderCircle className="spinning" aria-hidden="true" />
-                      : <Box aria-hidden="true" />}
-                    <span>{envelopeAction === 'single' ? '正在生成' : '生成包络'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedModel || envelopeAction !== null}
-                    onClick={handleGenerateAllEnvelopes}
-                  >
-                    {envelopeAction === 'all'
-                      ? <LoaderCircle className="spinning" aria-hidden="true" />
-                      : <Boxes aria-hidden="true" />}
-                    <span>{envelopeAction === 'all' ? '正在生成全部' : '全部生成包络'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedModel || envelopeAction !== null || storeAction !== null}
-                    title={envelopeState.state === 'ready' ? '把当前模型与包络固化保存到本地 SQLite 数据库' : '请先生成包络再存储'}
-                    onClick={handleStoreModel}
-                  >
-                    {storeAction === 'saving'
-                      ? <LoaderCircle className="spinning" aria-hidden="true" />
-                      : <Database aria-hidden="true" />}
-                    <span>{storeAction === 'saving' ? '正在存储' : '存储到数据库'}</span>
-                  </button>
+                <ModelSettingsActions scope={actionScope} onScopeChange={handleActionScopeChange}
+                  onGenerate={handleGenerateEnvelope} onStore={handleStoreModel}
+                  disabled={!selectedModel || coordinateEditing || activeEnvelopeAction !== null || storeAction !== null}
+                  generating={Boolean(currentEnvelopeAction)} preparing={Boolean(currentEnvelopeSubmission)}
+                  storing={storeAction === 'saving' && (storeSubmissionRef.current?.kind === 'all'
+                    || storeSubmissionRef.current?.modelId === selectedModel?.id)} />
+                <div className="model-settings-action-statuses">
+                  {envelopeProgress ? <ModelEnvelopeProgress progress={envelopeProgress} /> : (
+                    <p className={`model-settings-envelope-status ${currentEnvelopeSubmission ? 'generating' : envelopeState.state}`} aria-live="polite">
+                      {currentEnvelopeSubmission
+                        ? '正在保存参数并准备生成包络'
+                        : envelopeState.state === 'ready'
+                        ? '基础包络已生成'
+                        : envelopeState.state === 'generating'
+                          ? '正在生成当前模型包络'
+                          : envelopeState.state === 'generating-all'
+                            ? '正在依次生成全部模型包络'
+                            : envelopeState.state === 'error'
+                              ? `包络生成失败：${envelopeState.message}`
+                              : '当前模型尚未生成包络'}
+                    </p>
+                  )}
+                  <p className="model-settings-store-status" aria-live="polite">
+                    {storeState.loading
+                      ? '正在读取存储状态'
+                      : storeState.record
+                        ? `已存储 ${storeState.record_count} 次 · 最近 ${formatStoreTimestamp(storeState.record.created_at)}`
+                        : selectedModel
+                          ? '尚未存储到数据库'
+                          : '请先选择模型'}
+                  </p>
                 </div>
-                <p className={`model-settings-envelope-status ${envelopeState.state}`} aria-live="polite">
-                  {envelopeState.state === 'ready'
-                    ? '基础包络已生成'
-                    : envelopeState.state === 'generating'
-                      ? '正在生成当前模型包络'
-                      : envelopeState.state === 'generating-all'
-                        ? '正在依次生成全部模型包络'
-                        : envelopeState.state === 'error'
-                          ? `包络生成失败：${envelopeState.message}`
-                          : '当前模型尚未生成包络'}
-                </p>
-                <p className="model-settings-store-status" aria-live="polite">
-                  {storeState.loading
-                    ? '正在读取存储状态'
-                    : storeState.record
-                      ? `已存储 ${storeState.record_count} 次 · 最近 ${formatStoreTimestamp(storeState.record.created_at)}`
-                      : selectedModel
-                        ? '尚未存储到数据库'
-                        : '请先选择模型'}
-                </p>
+                {storeFailure && <p className="model-settings-envelope-preview-error" role="alert" aria-label="存储校验提示">{storeFailure}</p>}
+                <ModelStorageBatchResult result={storeBatchResult} />
                 {envelopePreview.display.state === 'error' && (
                   <p className="model-settings-envelope-preview-error" role="alert">
                     包络预览加载失败：{envelopePreview.display.message}，可关闭后重新打开。
                   </p>
                 )}
               </section>
+              </fieldset>
             </div>
           </div>
         </aside>
         <ModelPreviewPanel
-          emptyDetail="当前没有可预览的模型"
+          startup={previewStartup}
+          onRetry={() => setPreviewAttempt((attempt) => attempt + 1)}
+          emptyDetail="简易预览加载成功后，模型会自动出现在左侧列表；加载失败可在模型上传页重试"
           extraActions={(
             <button
               id="toggle-envelope-preview"

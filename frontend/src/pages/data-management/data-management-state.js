@@ -3,6 +3,9 @@
  * 本模块只处理固化存储数据、展示格式与 sessionStorage 选择缓存，不包含三维渲染和页面结构。
  */
 
+import { coordinateScale, scaledCoordinate } from '../model-settings/scaled-coordinates.js';
+import { formatParameterNumber } from '../../utils/number-format.js';
+
 const RECORD_SELECTION_STORAGE_KEY = 'sat-layout-opt:data-management-selection:v1';
 
 /** 读取本标签页上次查看的固化记录 ID；缓存不可用或为空时返回 null。 */
@@ -43,8 +46,7 @@ export function formatByteSize(value) {
     remaining /= 1024;
     index += 1;
   }
-  const digits = index === 0 ? 0 : remaining >= 100 ? 0 : 1;
-  return `${remaining.toFixed(digits)} ${units[index]}`;
+  return `${formatParameterNumber(remaining)} ${units[index]}`;
 }
 
 /** 把包围范围压缩为单行摘要，缺少数据时返回占位符。 */
@@ -55,7 +57,7 @@ export function formatBounds(bounds) {
   if (minimum.length !== 3 || maximum.length !== 3) return '--';
   const axis = ['X', 'Y', 'Z'];
   return axis
-    .map((name, index) => `${name} ${Number(minimum[index]).toFixed(1)}~${Number(maximum[index]).toFixed(1)}`)
+    .map((name, index) => `${name} ${formatParameterNumber(minimum[index])}~${formatParameterNumber(maximum[index])}`)
     .join('  ');
 }
 
@@ -72,15 +74,15 @@ export function formatSafetyClearance(settings) {
     ['bottom', '下'],
   ];
   return directions
-    .map(([key, label]) => `${label} ${Number(clearance[key] ?? 0).toLocaleString('zh-CN')}`)
+    .map(([key, label]) => `${label} ${formatParameterNumber(clearance[key] ?? 0)}`)
     .join(' / ');
 }
 
 /** 把模型设置中的初始姿态压缩为单行摘要。 */
 export function formatPose(settings) {
   if (!settings) return '--';
-  const rotation = `Rx ${settings.rotation_x}° · Ry ${settings.rotation_y}° · Rz ${settings.rotation_z}°`;
-  const scale = `比例 ${settings.model_scale} · 单位 ${settings.model_unit}`;
+  const rotation = `Rx ${formatParameterNumber(settings.rotation_x)}° · Ry ${formatParameterNumber(settings.rotation_y)}° · Rz ${formatParameterNumber(settings.rotation_z)}°`;
+  const scale = `比例 ${formatParameterNumber(settings.model_scale)} · 单位 ${settings.model_unit}`;
   return `${rotation} · ${scale} · 向上 ${settings.front_orientation === 'free' ? '自由' : settings.front_orientation}`;
 }
 
@@ -114,12 +116,12 @@ export function toStoredDetail(record) {
       sha256: record.source.sha256,
     },
     settings: {
-      mass: settings.mass === null || settings.mass === undefined ? '未设置' : settings.mass,
+      mass: formatParameterNumber(settings.mass, '未设置'),
       pose: formatPose(settings),
       safetyClearance: formatSafetyClearance(settings),
       installationFace: settings.installation_face_id || '未选择',
       centerOfMass: settings.center_of_mass
-        ? `X ${settings.center_of_mass.x} · Y ${settings.center_of_mass.y} · Z ${settings.center_of_mass.z}`
+        ? ['x', 'y', 'z'].map((axis) => `${axis.toUpperCase()} ${formatParameterNumber(scaledCoordinate(settings.center_of_mass[axis], coordinateScale(settings.model_scale)))}`).join(' · ')
         : '未设置',
     },
     envelope: {

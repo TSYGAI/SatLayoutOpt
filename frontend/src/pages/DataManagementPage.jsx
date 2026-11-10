@@ -1,12 +1,13 @@
 /**
- * 文件说明：数据管理功能页，负责固化记录检索、选择恢复、删除及包络预览的生命周期。
- * 详情展示委托 StoredRecordDetail，本页通过存储 API 读写固化记录，不修改原始模型与包络产物。
+ * 文件说明：数据管理功能页，负责固化记录检索、选择恢复、删除、下载反馈及包络预览的生命周期。
+ * 列表、检索、勾选和详情保留在应用会话；独立加载三维控制器，供面板与悬浮大窗共用。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Database, LoaderCircle, RefreshCcw, Search, Trash2 } from 'lucide-react';
+import { Database, LoaderCircle, RefreshCcw, Search, Trash2 } from '../components/icons.js';
 
 import { AppShell } from '../app/AppShell.jsx';
+import { usePageSessionState } from '../app/page-session-state.js';
 import {
   deleteStoredModel,
   deleteStoredModels,
@@ -14,8 +15,9 @@ import {
   listStoredModels,
 } from '../api/model-upload-api.js';
 import { showToast } from '../components/toast.js';
-import { createStoredEnvelopePreview } from './data-management/stored-envelope-preview.js';
 import { StoredRecordDetail } from './data-management/StoredRecordDetail.jsx';
+import { StoredRecordDeleteDialog } from './data-management/StoredRecordDeleteDialog.jsx';
+import { useStoredEnvelopeDownload } from './data-management/use-stored-envelope-download.js';
 import {
   readStoredRecordSelection,
   toStoredDetail,
@@ -31,18 +33,22 @@ const BULK_PAGE_SIZE = 500;
 
 /** 渲染数据管理页面。 */
 export function DataManagementPage() {
-  const [records, setRecords] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [keyword, setKeyword] = useState('');
-  const [appliedKeyword, setAppliedKeyword] = useState('');
+  const { downloadingVariant, downloadVariant } = useStoredEnvelopeDownload();
+  const [records, setRecords] = usePageSessionState('data-management', 'records', []);
+  const [total, setTotal] = usePageSessionState('data-management', 'total', 0);
+  const [keyword, setKeyword] = usePageSessionState('data-management', 'keyword', '');
+  const [appliedKeyword, setAppliedKeyword] = usePageSessionState('data-management', 'appliedKeyword', '');
   const [listState, setListState] = useState('loading');
-  const [detail, setDetail] = useState(null);
-  const [detailState, setDetailState] = useState('idle');
+  const [detail, setDetail] = usePageSessionState('data-management', 'detail', null);
+  const [detailState, setDetailState] = useState(detail ? 'ready' : 'idle');
   const [previewState, setPreviewState] = useState({ state: 'idle', message: '' });
-  const [selectedRecordId, setSelectedRecordId] = useState(readStoredRecordSelection);
-  const [checkedRecordIds, setCheckedRecordIds] = useState(() => new Set());
+  const [topologyEdgesVisible, setTopologyEdgesVisible] = useState(false);
+  const [selectedRecordId, setSelectedRecordId] = usePageSessionState('data-management', 'selectedRecordId', readStoredRecordSelection);
+  const [checkedRecordIds, setCheckedRecordIds] = usePageSessionState('data-management', 'checkedRecordIds', () => new Set());
   const [bulkState, setBulkState] = useState('idle');
+  const [deleteRequest, setDeleteRequest] = useState(null);
   const [previewElement, setPreviewElement] = useState(null);
+  const [previewReady, setPreviewReady] = useState(false);
   const previewRef = useRef(null);
   const selectAllRef = useRef(null);
   const shownPreviewUrlRef = useRef(null);
@@ -60,6 +66,17 @@ export function DataManagementPage() {
     previewRef.current?.fitView();
   }
 
+  /** 切换固化包络预览边线；边线几何由控制器按需创建并在关闭时释放。 */
+  const handleToggleTopologyEdges = useCallback(() => {
+    const visible = previewRef.current?.toggleTopologyEdges();
+    if (typeof visible === 'boolean') setTopologyEdgesVisible(visible);
+  }, []);
+
+  /** 在面板与大窗之间移动既有画布；不重建场景或重新加载包络资源。 */
+  const handleMovePreview = useCallback((container) => {
+    if (container) previewRef.current?.setContainer(container);
+  }, []);
+
   /** 在预览控制器就绪后加载指定记录的固化包络，同一记录只加载一次。 */
   const showPreview = useCallback(async (recordId, signal) => {
     if (!previewRef.current) {
@@ -67,6 +84,8 @@ export function DataManagementPage() {
       return;
     }
     if (shownPreviewUrlRef.current === recordId) return;
+    previewRef.current.setTopologyEdgesVisible?.(false);
+    setTopologyEdgesVisible(false);
     setPreviewState({ state: 'loading', message: '' });
     try {
       await previewRef.current.show(recordId, signal);
@@ -86,6 +105,10 @@ export function DataManagementPage() {
       if (signal?.aborted) return;
       setRecords(toStoredListItems(body.records));
       setTotal(body.total || 0);
+      if (body.total <= PAGE_SIZE) {
+        const identifiers = new Set(body.records.map((record) => record.record_id));
+        setCheckedRecordIds((current) => new Set([...current].filter((id) => identifiers.has(id))));
+      }
       setListState('ready');
     } catch (error) {
       if (error.name === 'AbortError') return;
@@ -127,7 +150,8 @@ export function DataManagementPage() {
       setDetailState('idle');
       return () => controller.abort();
     }
-    setDetailState('loading');
+    const hasCachedDetail = detail?.recordId === selectedRecordId;
+    setDetailState(hasCachedDetail ? 'ready' : 'loading');
     getStoredModel(selectedRecordId, controller.signal)
       .then((record) => {
         if (controller.signal.aborted) return;
@@ -141,37 +165,51 @@ export function DataManagementPage() {
           void refreshRecords();
           return;
         }
-        setDetailState('error');
+        setDetailState(hasCachedDetail ? 'ready' : 'error');
         showToast(`固化记录详情读取失败：${error.message}`, true);
       });
     return () => controller.abort();
   }, [selectedRecordId, refreshRecords]);
 
-  /** 画布节点变化时重建三维控制器，节点卸载时释放 GPU 资源。 */
+  /** 详情画布出现后才加载三维代码；切走时阻止迟到模块挂载，并释放既有 GPU 资源。 */
   useEffect(() => {
     if (!previewElement) return undefined;
-    previewRef.current = createStoredEnvelopePreview({ container: previewElement });
+    let disposed = false;
+    setPreviewReady(false);
+    setTopologyEdgesVisible(false);
+    setPreviewState({ state: 'loading', message: '' });
     shownPreviewUrlRef.current = null;
+    void import('./data-management/stored-envelope-preview.js').then((module) => {
+      if (disposed) return;
+      previewRef.current = module.createStoredEnvelopePreview({ container: previewElement });
+      setTopologyEdgesVisible(false);
+      setPreviewReady(true);
+    }).catch((error) => {
+      if (!disposed) setPreviewState({ state: 'error', message: `三维预览初始化失败：${error.message}` });
+    });
     return () => {
+      disposed = true;
       previewRef.current?.dispose();
       previewRef.current = null;
       shownPreviewUrlRef.current = null;
+      setTopologyEdgesVisible(false);
     };
   }, [previewElement]);
 
   /** 详情就绪后加载固化包络；画布或记录晚就绪时本 effect 会重新触发。 */
   useEffect(() => {
-    if (!detail) return undefined;
+    if (!detail || !previewReady || !previewRef.current) return undefined;
     if (!detail.envelope.previewUrl) {
       previewRef.current?.clear();
       shownPreviewUrlRef.current = null;
+      setTopologyEdgesVisible(false);
       setPreviewState({ state: 'unavailable', message: '该记录未保存包络浏览网格' });
       return undefined;
     }
     const controller = new AbortController();
     void showPreview(detail.recordId, controller.signal);
     return () => controller.abort();
-  }, [detail, previewElement, showPreview]);
+  }, [detail, previewElement, previewReady, showPreview]);
 
   /** 点击列表条目时切换右侧详情。 */
   function handleSelectRecord(recordId) {
@@ -235,49 +273,69 @@ export function DataManagementPage() {
   /** 清空当前详情和包络预览，用于删除正在查看的记录后恢复空状态。 */
   function clearSelectedDetail() {
     previewRef.current?.clear();
+    setTopologyEdgesVisible(false);
     setPreviewState({ state: 'idle', message: '' });
     setDetail(null);
     setDetailState('idle');
     setSelectedRecordId(null);
   }
 
-  /** 删除所有已勾选记录，完成后清空选择并刷新当前检索结果。 */
-  async function handleDeleteCheckedRecords() {
+  /** 请求删除所有已勾选记录；实际删除等待居中确认弹窗提交。 */
+  function handleDeleteCheckedRecords() {
     const identifiers = [...checkedRecordIds];
     if (!identifiers.length || bulkBusy) return;
     const deletingAll = allMatchingChecked;
     const scope = deletingAll ? `全部 ${identifiers.length} 条` : `选中的 ${identifiers.length} 条`;
-    if (!window.confirm(`确定永久删除${scope}固化记录及其资源吗？原始模型与包络产物不受影响。`)) return;
+    setDeleteRequest({ mode: 'bulk', identifiers, scope });
+  }
+
+  /** 执行确认后的批量删除，成功后清空选择并刷新当前检索结果。 */
+  async function deleteCheckedRecords(identifiers) {
     setBulkState('deleting');
     try {
       const result = await deleteStoredModels(identifiers);
       if (selectedRecordId && checkedRecordIds.has(selectedRecordId)) clearSelectedDetail();
       setCheckedRecordIds(new Set());
       await refreshRecords();
-      showToast(`已删除 ${result.deleted} 条固化记录，原始模型与包络产物不受影响`);
+      showToast(`已删除 ${result.deleted} 条固化记录，原始模型与包络产物不受影响`, false, { centered: true });
+      return { ok: true };
     } catch (error) {
-      showToast(`批量删除固化记录失败：${error.message}`, true);
+      return { ok: false, error: `批量删除固化记录失败：${error.message}` };
     } finally {
       setBulkState('idle');
     }
   }
 
-  /** 删除所选固化记录并刷新列表。 */
-  async function handleDeleteRecord() {
+  /** 请求删除当前详情记录；实际删除等待居中确认弹窗提交。 */
+  function handleDeleteRecord() {
     if (!selectedRecordId || bulkBusy) return;
+    setDeleteRequest({ mode: 'record', recordId: selectedRecordId, deviceName: detail?.deviceName || '当前固化记录' });
+  }
+
+  /** 执行确认后的单条删除并刷新列表。 */
+  async function deleteRecord(recordId) {
     try {
-      await deleteStoredModel(selectedRecordId);
+      await deleteStoredModel(recordId);
       setCheckedRecordIds((current) => {
         const next = new Set(current);
-        next.delete(selectedRecordId);
+        next.delete(recordId);
         return next;
       });
       clearSelectedDetail();
-      showToast('已删除该固化记录，原始模型与包络产物不受影响');
+      showToast('已删除该固化记录，原始模型与包络产物不受影响', false, { centered: true });
       void refreshRecords();
+      return { ok: true };
     } catch (error) {
-      showToast(`删除固化记录失败：${error.message}`, true);
+      return { ok: false, error: `删除固化记录失败：${error.message}` };
     }
+  }
+
+  /** 提交居中删除弹窗对应的固定目标，避免确认期间选择变化影响删除范围。 */
+  async function handleConfirmDelete() {
+    if (!deleteRequest) return { ok: false, error: '删除目标已失效，请重试。' };
+    return deleteRequest.mode === 'bulk'
+      ? deleteCheckedRecords(deleteRequest.identifiers)
+      : deleteRecord(deleteRequest.recordId);
   }
 
   const bulkDeleteLabel = bulkState === 'deleting'
@@ -339,7 +397,7 @@ export function DataManagementPage() {
             </section>
 
             <section className="model-settings-form-section" aria-label="存储记录列表">
-              {listState === 'error' ? (
+              {listState === 'error' && records.length === 0 ? (
                 <p className="data-management-empty" role="alert">存储记录读取失败，可点击刷新重试。</p>
               ) : records.length === 0 ? (
                 <p className="data-management-empty">
@@ -394,13 +452,25 @@ export function DataManagementPage() {
               previewState={previewState}
               bindPreviewContainer={bindPreviewContainer}
               onFitView={handleFitPreview}
+              onToggleTopologyEdges={handleToggleTopologyEdges}
+              topologyEdgesVisible={topologyEdgesVisible}
+              onMovePreview={handleMovePreview}
               onDelete={handleDeleteRecord}
               deleteDisabled={bulkBusy}
+              onDownload={downloadVariant}
+              downloadingVariant={downloadingVariant}
             />
           ) : null}
         </section>
       </main>
       <div id="toast" className="toast" role="status" aria-live="polite" hidden />
+      {deleteRequest && (
+        <StoredRecordDeleteDialog
+          request={deleteRequest}
+          onClose={() => setDeleteRequest(null)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
     </AppShell>
   );
 }

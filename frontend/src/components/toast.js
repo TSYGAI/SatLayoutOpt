@@ -9,13 +9,14 @@ let toastTimer = null;
  * 显示一条短暂提示，并在超时后自动隐藏。
  * @param {string} message 提示文本。
  * @param {boolean} error 为真时使用错误配色。
+ * @param {{ centered?: boolean }} [options] 可选展示位置；centered 用于需要居中反馈的页面操作。
  */
-export function showToast(message, error = false) {
+export function showToast(message, error = false, options = {}) {
   const toast = document.getElementById('toast');
   if (!toast) return;
   window.clearTimeout(toastTimer);
   toast.textContent = message;
-  toast.className = `toast${error ? ' error' : ''}`;
+  toast.className = `toast${error ? ' error' : ''}${options.centered ? ' toast-centered' : ''}`;
   toast.hidden = false;
   toastTimer = window.setTimeout(() => { toast.hidden = true; }, 3600);
 }

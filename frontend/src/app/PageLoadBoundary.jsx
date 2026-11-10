@@ -4,7 +4,7 @@
  */
 
 import { Component, Suspense } from 'react';
-import { LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react';
+import { LoaderCircle, RefreshCw, TriangleAlert } from '../components/icons.js';
 
 import { AppShell } from './AppShell.jsx';
 import '../../styles/page-loading.css';

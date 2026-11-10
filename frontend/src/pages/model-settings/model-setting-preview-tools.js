@@ -1,12 +1,29 @@
 /**
  * 文件说明：为模型设置页提供质心标记、安装面轮廓、曲面点击点和基于 BVH 的单击拾取。
- * 本模块只消费高清 GLB 网格与 STEP 面映射；精确曲面投影和法向校验仍由后端 STEP 完成。
+ * 本模块消费具有 STEP 面映射的快速或高清 GLB；精确曲面投影和法向校验仍由后端 STEP 完成。
  */
+import { observe, reportError } from '../../observability/runtime-log.js';
+
 
 import * as THREE from 'three';
+import { getModelPreviewTransform, normalizeModelSettings } from './model-settings-state.js';
+import { INSTALLATION_FACE_SELECTED_EVENT, INSTALLATION_PICKER_STATE_EVENT } from './model-preview-events.js';
+import { applySourceDisplayTransform, currentToInitialMatrix } from './coordinate-frame.js';
 
-export const INSTALLATION_FACE_SELECTED_EVENT = 'sat-layout-installation-face-selected';
-export const INSTALLATION_PICKER_STATE_EVENT = 'sat-layout-installation-picker-state';
+export { INSTALLATION_FACE_SELECTED_EVENT, INSTALLATION_PICKER_STATE_EVENT } from './model-preview-events.js';
+
+/** 计算质心经过当前单位、比例和 XYZ 旋转后的预览世界坐标；输入不完整时返回 null。 */
+export function getCenterOfMassPreviewPosition(values) {
+  const normalized = normalizeModelSettings(values);
+  const center = normalized.center_of_mass;
+  if (!center || [center.x, center.y, center.z].some((value) => value === '' || !Number.isFinite(Number(value)))) return null;
+  const transform = getModelPreviewTransform(normalized);
+  if (!transform) return null;
+  return new THREE.Vector3(Number(center.x), Number(center.y), Number(center.z))
+    .multiplyScalar(transform.scale)
+    .applyEuler(new THREE.Euler(...transform.rotation, 'XYZ'))
+    .toArray();
+}
 
 const POINTER_CLICK_TOLERANCE = 5;
 const CENTER_OF_MASS_PIXELS = 34;
@@ -159,7 +176,7 @@ function readCenterOfMass(settings) {
   return coordinates.every(Number.isFinite) ? coordinates : null;
 }
 
-/** 从设置读取有限的 STEP 源坐标安装点，旧平面记录没有该字段时返回空。 */
+/** 从设置读取有限的 STEP 源坐标安装点；该值绑定原始 STEP 面，旧平面记录没有时返回空。 */
 function readInstallationPoint(settings) {
   const point = settings?.installation_point;
   if (!point || typeof point !== 'object') return null;
@@ -224,7 +241,7 @@ export function createModelSettingPreviewTools(options) {
   /** 根据当前高清映射和索引状态发送可用性。 */
   function emitCurrentState() {
     if (!context.enabled || !context.detailRoot || !context.mappingEntries.length) {
-      emitState('unavailable', '等待高清预览与 STEP 面映射');
+      emitState('unavailable', '等待预览与 STEP 面映射');
       return;
     }
     const resource = pickerResources.get(context.detailRoot);
@@ -294,6 +311,7 @@ export function createModelSettingPreviewTools(options) {
       overlayRoot.add(faceOutline, faceIndicator);
       faceOverlayKey = nextKey;
     } catch (error) {
+      reportError(error);
       onError(`安装面标记无法显示：${error.message}`);
     }
   }
@@ -302,9 +320,7 @@ export function createModelSettingPreviewTools(options) {
   function applyTransform() {
     const transform = context.transform;
     if (!transform) return;
-    overlayRoot.scale.setScalar(transform.scale);
-    overlayRoot.rotation.set(...transform.rotation, 'XYZ');
-    overlayRoot.updateMatrixWorld(true);
+    applySourceDisplayTransform(overlayRoot, transform, context.settings.coordinate_frame);
   }
 
   /** 将指定像素尺寸换算为一个覆盖标记的局部缩放。 */
@@ -334,7 +350,7 @@ export function createModelSettingPreviewTools(options) {
   function renderCenterOfMass() {
     const coordinates = context.enabled ? readCenterOfMass(context.settings) : null;
     centerMarker.visible = Boolean(coordinates);
-    if (coordinates) centerMarker.position.fromArray(coordinates);
+    if (coordinates) centerMarker.position.fromArray(coordinates).applyMatrix4(currentToInitialMatrix(context.settings.coordinate_frame));
   }
 
   /** 首次需要拾取时动态加载 BVH 主模块与 Worker，避免增加普通预览启动成本。 */
@@ -351,10 +367,19 @@ export function createModelSettingPreviewTools(options) {
 
   /** 串行地在复用 Worker 中构建一个克隆网格的 BVH。 */
   function enqueueBvhBuild(geometry) {
+    return observe('排队与构建安装面 BVH', { model: context.modelId },
+      (operation) => enqueueBvhBuildLogged(geometry, operation), { long: true });
+  }
+
+  /** 执行排队与构建安装面 BVH，记录队列等待与 Worker 计算的各自阶段。 */
+  function enqueueBvhBuildLogged(geometry, operation) {
+    operation.step('等待 BVH Worker 队列');
     const task = workerQueue.catch(() => undefined).then(async () => {
       if (destroyed) throw new Error('安装面拾取控制器已释放');
+      operation.step('加载 BVH 模块');
       const modules = await loadBvhModules();
       worker ||= new modules.GenerateMeshBVHWorker();
+      operation.step('Worker 构建安装面 BVH', { vertices: geometry.attributes.position.count });
       const boundsTree = await worker.generate(geometry, { indirect: true, maxLeafTris: 12 });
       geometry.boundsTree = boundsTree;
       return modules.acceleratedRaycast;
@@ -396,8 +421,15 @@ export function createModelSettingPreviewTools(options) {
 
   /** 在当前画布位置执行一次加速射线拾取并更新安装面草稿。 */
   async function pickFace(clientX, clientY) {
+    return observe('安装面拾取', { model: context.modelId },
+      (operation) => pickFaceLogged(clientX, clientY, operation));
+  }
+
+  /** 执行安装面拾取，失败同时保留用户反馈与带操作编号的定位信息。 */
+  async function pickFaceLogged(clientX, clientY, operation) {
     const activeContext = context;
     try {
+      operation.step('等待安装面 BVH 就绪');
       const resource = await preparePicker(activeContext.detailRoot);
       if (!picking || context !== activeContext || destroyed) return;
       const bounds = renderer.domElement.getBoundingClientRect();
@@ -406,6 +438,7 @@ export function createModelSettingPreviewTools(options) {
         -((clientY - bounds.top) / Math.max(bounds.height, 1)) * 2 + 1,
       );
       raycaster.setFromCamera(pointer, camera);
+      operation.step('射线命中与 STEP 面映射');
       activeContext.detailRoot.updateMatrixWorld(true);
       resource.pickMesh.matrixWorld.copy(activeContext.detailRoot.matrixWorld);
       const hit = raycaster.intersectObject(resource.pickMesh, false)[0];
@@ -449,6 +482,7 @@ export function createModelSettingPreviewTools(options) {
       emitCurrentState();
       requestRender();
     } catch (error) {
+      operation.finish(error);
       if (context === activeContext) {
         picking = false;
         renderer.domElement.classList.remove('installation-picking');
@@ -560,6 +594,7 @@ export function createModelSettingPreviewTools(options) {
       onStatus('安装面选择中', 'busy');
       return true;
     } catch (error) {
+      reportError(error);
       if (context.detailRoot === activeRoot) {
         emitState('error', '安装面拾取索引构建失败');
         onError(`安装面拾取不可用：${error.message}`);

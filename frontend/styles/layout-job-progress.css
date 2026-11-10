@@ -1,0 +1,85 @@
+/** 文件说明：布局任务阶段路径、预算进度与运行记录的独立样式；阶段名称加粗并复用工作台主题和侧栏字号，兼容深浅主题、窄屏和减少动画设置。 */
+
+.layout-optimization-section.layout-job-progress {
+  --progress-surface: #111f2c;
+  --progress-track: #243544;
+  --progress-stopped: #8aa3b7;
+  --progress-soft: #112d3b;
+  --progress-error: #f0a7ad;
+  --progress-fill: var(--cyan);
+  gap: 0;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.layout-job-progress.is-stopped { --progress-fill: var(--progress-stopped); }
+.layout-job-progress.is-done { --progress-fill: var(--green); }
+.layout-job-progress.is-error { --progress-fill: var(--progress-error); }
+.layout-progress-heading { display: flex; align-items: center; gap: 7px; }
+.layout-progress-status { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 2px 7px; border-radius: 4px; color: var(--muted); background: var(--progress-surface); font-size: 11px; white-space: nowrap; }
+.layout-progress-status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.layout-job-progress.is-active .layout-progress-status { color: var(--cyan); background: var(--progress-soft); }
+.layout-job-progress.is-done .layout-progress-status { color: var(--green); }
+.layout-job-progress.is-error .layout-progress-status { color: var(--progress-error); }
+
+.layout-progress-steps { list-style: none; margin: 0; padding: 18px 0 0; }
+.layout-progress-steps > li { position: relative; min-width: 0; padding: 0 0 20px 29px; }
+.layout-progress-steps > li::before { content: ''; position: absolute; left: 9px; top: 24px; bottom: 4px; width: 1px; background: var(--line); }
+.layout-progress-steps > li:last-child { padding-bottom: 0; }
+.layout-progress-steps > li:last-child::before { display: none; }
+.layout-progress-mark { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--progress-surface); color: var(--muted); font-size: 11px; font-weight: 500; }
+.layout-progress-mark svg { width: 12px; height: 12px; stroke-width: 2; }
+.layout-progress-mark.is-done { color: var(--cyan); background: var(--progress-soft); }
+.layout-progress-mark.is-active { color: var(--bg); background: var(--cyan); }
+.layout-progress-mark.is-error { color: var(--progress-error); }
+.layout-progress-mark.is-stopped { color: var(--progress-stopped); background: var(--progress-track); }
+.layout-progress-stop { width: 5px; height: 5px; background: currentColor; }
+.layout-progress-stage-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.layout-job-progress .layout-progress-stage-heading > .layout-sidebar-subtitle { font-weight: 700; }
+.layout-progress-stage-heading > span { flex-shrink: 0; color: var(--muted); font-size: 11px; }
+.layout-progress-budget { padding-top: 10px; }
+.layout-progress-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.layout-progress-row > span { color: var(--muted); font-size: 11px; }
+.layout-progress-percent { font-size: 20px; line-height: 26px; font-weight: 600; white-space: nowrap; }
+.layout-progress-percent small { margin-left: 2px; font-size: 11px; font-weight: 400; }
+.layout-progress-meter { height: 7px; margin: 9px 0 10px; overflow: hidden; border-radius: 4px; background: var(--progress-track); }
+.layout-progress-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--progress-fill); transition: width 180ms ease; }
+.layout-progress-attempts { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 0; font-size: 11px; }
+.layout-progress-attempts > span { color: var(--muted); }
+.layout-progress-attempts > strong { font-size: 12px; font-weight: 500; white-space: nowrap; }
+.layout-progress-message, .layout-progress-result { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.layout-progress-message.is-error { color: var(--progress-error); }
+.layout-progress-result strong { color: var(--text); font-weight: 500; }
+
+.layout-progress-records { margin-top: 18px; border-top: 1px solid var(--line); }
+.layout-progress-records > summary { display: flex; align-items: center; gap: 7px; padding: 13px 0 10px; list-style: none; font-weight: 500; cursor: pointer; }
+.layout-progress-records > summary::-webkit-details-marker { display: none; }
+.layout-progress-records > summary > svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--muted); stroke-width: 1.8; }
+.layout-progress-records > summary > small { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 400; }
+.layout-progress-chevron { transition: transform 150ms ease; }
+.layout-progress-records[open] .layout-progress-chevron { transform: rotate(180deg); }
+.layout-progress-records > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 3px; }
+.layout-progress-events { max-height: 216px; margin: 0; padding: 0 4px 0 0; overflow-y: auto; list-style: none; scrollbar-width: thin; scrollbar-color: var(--progress-track) transparent; }
+.layout-progress-events > li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 9px; padding: 9px 0; }
+.layout-progress-events > li + li { border-top: 1px solid var(--line); }
+.layout-progress-events time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.layout-progress-events > li > span { min-width: 0; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+:root[data-theme="light"] .layout-job-progress {
+  --progress-surface: #f5f9fb;
+  --progress-track: #e6eef2;
+  --progress-stopped: #698397;
+  --progress-soft: #edf7fa;
+  --progress-error: #a53143;
+}
+
+@media (max-width: 420px) {
+  .layout-progress-events > li { grid-template-columns: 52px minmax(0, 1fr); gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layout-progress-meter > span, .layout-progress-chevron { transition: none; }
+}

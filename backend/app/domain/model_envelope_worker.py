@@ -20,6 +20,7 @@ def main() -> int:
     request_path = Path(sys.argv[1])
     error_path = Path(sys.argv[2])
     try:
+        os.environ["SAT_LAYOUT_ENVELOPE_ISOLATED"] = "1"
         request = json.loads(request_path.read_text(encoding="utf-8"))
         generate_model_envelope(
             Path(request["source_step_path"]),

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 文件说明：SatLayoutOpt 星构均衡版 small；整体重构内部卫星比例与配色，保留主轨道和底部速度弧，纯矢量且无外部依赖。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">SatLayoutOpt · 星构均衡版</title>
+  <desc id="desc">紧凑立方星体与两块等大的青色翼面构成统一斜轴，白色主轨道与青色速度弧环绕下方。</desc>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#101F35"/>
+  <g fill="#FFFFFF"><g transform="rotate(-10 256 248)"><path d="M80 308C66 264 119 202 198 169C143 210 116 251 132 277C157 321 312 294 432 196C345 315 118 404 80 308Z"/></g><g transform="translate(0 16)"><path fill="#73E3EE" d="M105 389C178 390 278 324 354 250C280 350 184 416 105 389Z"/></g><g transform="translate(20 18) scale(.92)">
+  <!-- 顶面与两个立面使用统一轴测比例，留白同时形成清晰的结构边界。 -->
+  <path fill="#FFFFFF" d="M256 158L304 186L256 214L208 186Z"/>
+  <path fill="#DDECF4" d="M208 201L248 224V276L208 252Z"/>
+  <path fill="#73E3EE" d="M264 224L304 201V252L264 276Z"/>
+  <!-- 两侧翼面完全等大，沿星体中心的同一斜轴排列，使用一致的青色。 -->
+  <path fill="#73E3EE" d="M150 236L188 214V260L150 282ZM324 172L362 150V196L324 218Z"/>
+</g></g>
+</svg>

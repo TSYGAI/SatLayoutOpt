@@ -1,9 +1,11 @@
 /**
- * 文件说明：固化记录详情视图，按模型参数、包络预览、基础包络文件和校验信息分组展示数据。
- * 只接收已格式化的记录与页面回调；请求、删除状态和 Three.js 生命周期由数据管理页负责。
+ * 文件说明：固化记录详情视图，按模型参数、包络预览、正式包络存储信息与 STL 下载分组展示数据。
+ * 只接收已格式化的记录与页面回调；请求、下载反馈、删除状态和 Three.js 生命周期由页面及专用 hook 负责。
  */
 
-import { Box, ChevronRight, Download, FileText, Fingerprint, Layers3, LoaderCircle, Maximize2, Trash2 } from 'lucide-react';
+import { ChevronRight, Download, FileText, Fingerprint, Layers3, LoaderCircle, Trash2 } from '../../components/icons.js';
+import { StoredEnvelopePreview } from './StoredEnvelopePreview.jsx';
+import { formatParameterNumber } from '../../utils/number-format.js';
 
 /** 展示标签与完整取值；wide 跨整行，mono 用于可选择复制的技术标识。 */
 function InfoItem({ label, value, mono = false, wide = false }) {
@@ -44,46 +46,9 @@ function ModelInformation({ detail }) {
   );
 }
 
-/** 展示包络画布及其加载状态；复位按钮调用页面提供的相机适配回调。 */
-function EnvelopePreview({ detail, previewState, bindPreviewContainer, onFitView }) {
-  return (
-    <section className="data-management-panel data-management-preview-panel" aria-labelledby="stored-envelope-title">
-      <div className="data-management-panel-heading">
-        <h3 id="stored-envelope-title"><Box aria-hidden="true" />包络预览</h3>
-        <span className={`data-management-status${detail.envelope.state === 'ready' ? ' is-ready' : ''}`}>
-          <span aria-hidden="true" />
-          {detail.envelope.state === 'ready' ? '已生成' : detail.envelope.state}
-        </span>
-      </div>
-      <div className="data-management-preview">
-        <div ref={bindPreviewContainer} className="data-management-preview-canvas" />
-        {previewState.state === 'ready' ? (
-          <button type="button" className="data-management-fit-view" onClick={onFitView} title="适应视图" aria-label="适应视图">
-            <Maximize2 aria-hidden="true" />
-          </button>
-        ) : (
-          <div className="data-management-preview-overlay" aria-live="polite">
-            {previewState.state === 'loading' && <LoaderCircle className="spinning" aria-hidden="true" />}
-            <span>
-              {previewState.state === 'error'
-                ? `包络预览加载失败：${previewState.message}`
-                : previewState.state === 'unavailable'
-                  ? previewState.message
-                  : '正在加载包络预览'}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="data-management-preview-caption">
-        <span>生成于 {detail.envelope.generatedAtText}</span>
-        <span>拖动旋转 · 滚轮缩放</span>
-      </div>
-    </section>
-  );
-}
-
-/** 展示正式包络文件及下载入口；新记录仅含 0 度基础包络，旧多方向记录保持可查。 */
-function DirectionVariants({ variants }) {
+/** 展示正式包络文件及下载等待状态；下载交给页面执行，新记录仅含基础包络，旧记录保持可查。 */
+function DirectionVariants({ detail, onDownload, downloadingVariant }) {
+  const variants = detail.envelope.variants;
   return (
     <section className="data-management-panel data-management-variants-panel" aria-labelledby="stored-variants-title">
       <div className="data-management-panel-heading">
@@ -96,7 +61,7 @@ function DirectionVariants({ variants }) {
             <thead>
               <tr>
                 <th scope="col">方向</th>
-                <th scope="col">文件大小</th>
+                <th scope="col">存储大小</th>
                 <th scope="col">网格规模</th>
                 <th scope="col">水密</th>
                 <th scope="col">包围范围（mm）</th>
@@ -104,16 +69,27 @@ function DirectionVariants({ variants }) {
               </tr>
             </thead>
             <tbody>
-              {variants.map((variant) => (
-                <tr key={variant.rotZ}>
-                  <th scope="row"><span className="data-management-direction">{variant.rotZ === 0 ? '基础包络' : `历史 Rz ${variant.rotZ}°`}</span></th>
-                  <td>{variant.sizeText}</td>
-                  <td>{variant.triangleText}</td>
-                  <td><span className={`data-management-watertight${variant.watertight ? ' is-ready' : ''}`}>{variant.watertight ? '是' : '否'}</span></td>
-                  <td className="mono data-management-bounds">{variant.boundsText}</td>
-                  <td><a href={variant.downloadUrl} download aria-label={`下载 ${variant.rotZ === 0 ? '基础包络' : `历史 Rz ${variant.rotZ}° 包络`}`}><Download aria-hidden="true" />下载</a></td>
-                </tr>
-              ))}
+              {variants.map((variant) => {
+                const downloading = downloadingVariant?.recordId === detail.recordId && downloadingVariant.rotZ === variant.rotZ;
+                const label = variant.rotZ === 0 ? '基础包络' : `历史 Rz ${formatParameterNumber(variant.rotZ)}° 包络`;
+                return (
+                  <tr key={variant.rotZ}>
+                    <th scope="row"><span className="data-management-direction">{variant.rotZ === 0 ? '基础包络' : `历史 Rz ${formatParameterNumber(variant.rotZ)}°`}</span></th>
+                    <td>{variant.sizeText}</td>
+                    <td>{variant.triangleText}</td>
+                    <td><span className={`data-management-watertight${variant.watertight ? ' is-ready' : ''}`}>{variant.watertight ? '是' : '否'}</span></td>
+                    <td className="mono data-management-bounds">{variant.boundsText}</td>
+                    <td>
+                      <button className="data-management-download" type="button" disabled={Boolean(downloadingVariant)}
+                        aria-label={`${downloading ? '正在下载' : '下载'} ${label}`} aria-busy={downloading}
+                        onClick={() => void onDownload(detail.recordId, detail.deviceName, variant)}>
+                        {downloading ? <LoaderCircle className="spinning" aria-hidden="true" /> : <Download aria-hidden="true" />}
+                        {downloading ? '下载中…' : '下载 STL'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -127,7 +103,8 @@ function DirectionVariants({ variants }) {
  * @param {object} props 包含格式化详情、预览状态、画布绑定及操作回调。
  * @returns {import('react').ReactNode} 详情标题、双栏概览、变体表格与可展开的技术信息。
  */
-export function StoredRecordDetail({ detail, previewState, bindPreviewContainer, onDelete, deleteDisabled, onFitView }) {
+export function StoredRecordDetail({ detail, previewState, bindPreviewContainer, onDelete, deleteDisabled, onFitView,
+  onToggleTopologyEdges, topologyEdgesVisible, onMovePreview, onDownload, downloadingVariant }) {
   return (
     <div className="data-management-detail-content">
       <header className="data-management-detail-header">
@@ -148,9 +125,11 @@ export function StoredRecordDetail({ detail, previewState, bindPreviewContainer,
       <div className="data-management-detail-body">
         <div className="data-management-overview">
           <ModelInformation detail={detail} />
-          <EnvelopePreview detail={detail} previewState={previewState} bindPreviewContainer={bindPreviewContainer} onFitView={onFitView} />
+          <StoredEnvelopePreview detail={detail} previewState={previewState} bindPreviewContainer={bindPreviewContainer}
+            onFitView={onFitView} onToggleTopologyEdges={onToggleTopologyEdges} topologyEdgesVisible={topologyEdgesVisible}
+            onMovePreview={onMovePreview} />
         </div>
-        <DirectionVariants variants={detail.envelope.variants} />
+        <DirectionVariants detail={detail} onDownload={onDownload} downloadingVariant={downloadingVariant} />
         <details className="data-management-panel data-management-technical" key={detail.recordId}>
           <summary>
             <Fingerprint aria-hidden="true" />

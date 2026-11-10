@@ -1,0 +1,360 @@
+/**
+ * 文件说明：人工微调工作台的视觉与响应式布局，沿用原有工作台的青蓝色、面板层次和 Lucide 线性图标；质心坐标以圆形轴标和横向只读数值展示。
+ * 样式限定在微调页与其弹窗内；保留三栏、滚动、画布命中及放大预览边界，不参与业务和三维材质计算。
+ */
+
+/* 局部主题变量对应既有模型、布局页面；弹窗通过 Portal 挂载，需独立继承同一套颜色。 */
+.refinement-page, .refinement-leave-dialog {
+  --refinement-surface: #0c151f;
+  --refinement-raised: #101b26;
+  --refinement-input: #080e15;
+  --refinement-border: #29404f;
+  --refinement-accent: #39d0e9;
+  --refinement-selected: #0d2a33;
+  --refinement-primary: #39bdd4;
+  --refinement-primary-text: #062c38;
+  --refinement-axis-background: #17303b;
+  --refinement-axis-text: #87c4cf;
+  --refinement-danger: #ff849e;
+  --refinement-disabled: #6e879a;
+  font-family: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+:root[data-theme="light"] :is(.refinement-page, .refinement-leave-dialog) {
+  --refinement-surface: #ffffff;
+  --refinement-raised: #f7fafc;
+  --refinement-input: #ffffff;
+  --refinement-border: #c9d9e3;
+  --refinement-accent: #087fa5;
+  --refinement-selected: #e8f6fb;
+  --refinement-primary: #0b7892;
+  --refinement-primary-text: #ffffff;
+  --refinement-axis-background: #e9f2f4;
+  --refinement-axis-text: #35717c;
+  --refinement-danger: #b63b51;
+  --refinement-disabled: #7b8f9e;
+}
+.refinement-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  height: 100dvh;
+  min-height: 0;
+  color: var(--text);
+  background: var(--bg);
+}
+.refinement-page :where(button, input, select) { font: inherit; }
+.refinement-page :where(.refinement-header, .refinement-workspace, .refinement-status) :where(button), .refinement-leave-dialog button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--refinement-border);
+  border-radius: 7px;
+  background: var(--refinement-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.refinement-page :where(.refinement-header, .refinement-workspace, .refinement-status) button:hover:not(:disabled), .refinement-leave-dialog button:hover:not(:disabled) {
+  background: var(--refinement-selected);
+  border-color: var(--refinement-accent);
+  color: var(--refinement-accent);
+}
+.refinement-page :where(.refinement-header, .refinement-workspace, .refinement-status) button:disabled, .refinement-leave-dialog button:disabled {
+  color: var(--refinement-disabled);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.refinement-page button.primary, .refinement-leave-dialog button.primary {
+  background: var(--refinement-primary);
+  border-color: var(--refinement-primary);
+  color: var(--refinement-primary-text);
+  box-shadow: inset 0 1px 0 #ffffff1f, 0 1px 2px #0000000d;
+}
+.refinement-page button.primary:hover:not(:disabled), .refinement-leave-dialog button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--refinement-primary) 90%, var(--text));
+  border-color: var(--refinement-primary);
+  color: var(--refinement-primary-text);
+}
+.refinement-page button.primary:disabled {
+  background: color-mix(in srgb, var(--refinement-primary) 12%, var(--refinement-surface));
+  border-color: var(--refinement-border);
+  color: var(--refinement-disabled);
+  box-shadow: none;
+}
+.refinement-page :is(button, input, select, summary):focus-visible, .refinement-leave-dialog button:focus-visible { outline: 2px solid var(--refinement-accent); outline-offset: -3px; }
+.refinement-page :where(button, summary, h2, .refinement-metrics, .refinement-coordinate-block) svg, .refinement-leave-dialog svg { flex: 0 0 auto; width: 16px; height: 16px; stroke-width: 1.75; }
+.refinement-page :where(button, summary) svg { pointer-events: none; }
+.refinement-page input:not([type="checkbox"]), .refinement-page select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--refinement-border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--refinement-input);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.refinement-page input:not([type="checkbox"]):focus { border-color: var(--refinement-accent); }
+.refinement-page input:disabled, .refinement-page select:disabled { color: var(--refinement-disabled); background: var(--refinement-raised); cursor: not-allowed; }
+.refinement-page input::placeholder { color: var(--muted); }
+.refinement-page input[type="checkbox"] { accent-color: var(--refinement-accent); width: 14px; height: 14px; flex: 0 0 auto; margin: 0; }
+.refinement-page [hidden] { display: none !important; }
+
+.refinement-header { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 16px 24px; flex-wrap: wrap; }
+.refinement-header > div { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.refinement-header h1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 5px 0 0; font-size: 20px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.refinement-header h1 small { padding: 3px 7px; border: 1px solid var(--refinement-border); border-radius: 5px; background: var(--refinement-surface); color: var(--muted); font-size: 11px; font-weight: 400; }
+.refinement-header p { margin: 0; font-size: 11px; color: var(--muted); }
+.refinement-header .refinement-back { background: var(--refinement-surface); flex-shrink: 0; }
+.refinement-header .refinement-header-actions { flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.refinement-draft-status { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--muted); font-size: 11px; }
+.refinement-draft-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.refinement-draft-status.is-dirty { color: var(--orange); }
+.refinement-draft-status.is-dirty::before { background: currentColor; }
+.refinement-workspace { display: grid; grid-template-columns: clamp(204px, 15vw, 250px) minmax(0, 1fr) clamp(262px, 19vw, 320px); min-height: 0; margin: 0 24px; border: 1px solid var(--refinement-border); border-radius: 9px; background: var(--refinement-surface); overflow: hidden; }
+.refinement-objects, .refinement-parameters { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 12px; scrollbar-width: thin; scrollbar-color: var(--refinement-border) transparent; }
+.refinement-objects { border-right: 1px solid var(--refinement-border); }
+.refinement-objects > h2 { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; margin: 0 4px 14px; }
+.refinement-objects > h2 > svg { color: var(--refinement-accent); }
+.refinement-objects > h2 > span { margin-left: auto; border: 1px solid var(--refinement-border); padding: 1px 6px; border-radius: 4px; background: var(--refinement-raised); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.refinement-workflow-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 0 2px 14px; }
+.refinement-workflow-actions button { color: var(--refinement-accent); }
+.refinement-object { display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: 7px; margin: 4px 0; }
+.refinement-object:hover { background: var(--refinement-raised); }
+.refinement-object.selected { border-color: color-mix(in srgb, var(--refinement-accent) 45%, var(--refinement-border)); background: var(--refinement-selected); box-shadow: inset 3px 0 0 var(--refinement-accent); }
+.refinement-object > button[data-instance] { border: 0; display: flex; justify-content: flex-start; align-items: center; gap: 10px; text-align: left; flex: 1; min-width: 0; padding: 10px 7px; background: transparent; }
+.refinement-object > button[data-instance]:hover:not(:disabled) { background: transparent; }
+.refinement-object > button > span:last-child { min-width: 0; }
+.refinement-object strong { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.refinement-object small, .refinement-group-name small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; font-weight: 400; }
+.refinement-object-mark { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 32px; border-radius: 6px; color: var(--muted); flex: 0 0 auto; }
+.refinement-object-mark > svg { width: 22px; height: 22px; stroke-width: 1.65; }
+.selected .refinement-object-mark { color: var(--refinement-accent); background: color-mix(in srgb, var(--refinement-accent) 9%, transparent); }
+.refinement-object.nested > button[data-instance] { padding-left: 17px; }
+.refinement-object.is-hidden > button[data-instance] { opacity: .6; }
+.refinement-page button.refinement-visibility { display: inline-flex; flex: 0 0 28px; width: 28px; height: 28px; min-height: 28px; align-items: center; justify-content: center; gap: 0; padding: 0; margin-right: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); }
+.refinement-page button.refinement-visibility.is-hidden { color: var(--orange); }
+.refinement-page button.refinement-visibility.is-partial { color: var(--refinement-accent); }
+.refinement-group { margin-bottom: 10px; }
+.refinement-group-heading { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.refinement-child-group { margin: 6px 0 6px 12px; padding-left: 5px; border-left: 1px solid var(--refinement-border); }
+.refinement-group-name { display: flex; justify-content: flex-start; align-items: center; gap: 8px; flex: 1; min-width: 0; text-align: left; border-color: transparent; background: var(--refinement-raised); }
+.refinement-group-name.selected { border-color: color-mix(in srgb, var(--refinement-accent) 45%, var(--refinement-border)); background: var(--refinement-selected); }
+.refinement-group-name > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.refinement-object-navigation { display: flex; justify-content: space-between; gap: 4px; padding-top: 12px; margin-top: 14px; border-top: 1px solid var(--line); }
+.refinement-object-navigation button { gap: 2px; font-size: 11px; padding: 4px; min-height: 28px; border-color: transparent; background: transparent; color: var(--muted); font-weight: 400; }
+.refinement-saved-versions { margin: 14px 2px 0; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.refinement-page summary { cursor: pointer; border-radius: 4px; }
+:is(.refinement-saved-versions, .refinement-version-name, .refinement-dimensions, .refinement-display-settings) > summary { display: flex; align-items: center; gap: 7px; list-style: none; }
+:is(.refinement-saved-versions, .refinement-version-name, .refinement-dimensions, .refinement-display-settings) > summary::-webkit-details-marker { display: none; }
+.refinement-page summary:hover { color: var(--refinement-accent); }
+.refinement-page summary .refinement-disclosure { margin-left: auto; width: 14px; height: 14px; color: var(--muted); transition: transform 140ms ease; }
+.refinement-page details[open] > summary .refinement-disclosure { transform: rotate(180deg); }
+.refinement-saved-versions select { display: block; margin: 12px 0 8px; }
+.refinement-saved-versions button { width: 100%; }
+
+.refinement-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--refinement-surface); }
+.refinement-view-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--refinement-border); }
+.refinement-segmented { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 3px; border: 1px solid var(--refinement-border); border-radius: 7px; background: var(--refinement-raised); }
+.refinement-segmented button { min-height: 28px; background: transparent; border-color: transparent; border-radius: 4px; font-size: 12px; padding: 3px 7px; color: var(--muted); font-weight: 500; }
+.refinement-segmented button[aria-pressed="true"] { color: var(--refinement-accent); background: var(--refinement-selected); border-color: color-mix(in srgb, var(--refinement-accent) 38%, var(--refinement-border)); }
+.refinement-segmented button:disabled { color: var(--refinement-disabled); opacity: .65; }
+.refinement-view-actions { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+.refinement-view-actions > button, .refinement-display-settings > summary { min-height: 30px; font-size: 11px; font-weight: 500; border: 1px solid transparent; border-radius: 5px; background: transparent; padding: 4px 6px; color: var(--muted); }
+.refinement-view-actions > button[aria-pressed="true"], .refinement-display-settings[open] > summary { background: var(--refinement-selected); color: var(--refinement-accent); border-color: var(--refinement-border); }
+.refinement-display-settings { position: relative; }
+.refinement-display-settings > div { position: absolute; right: 0; top: calc(100% + 7px); z-index: 8; width: 200px; padding: 14px; display: grid; gap: 12px; max-height: min(420px, 65vh); overflow-y: auto; border: 1px solid var(--refinement-border); border-radius: 8px; background: var(--refinement-surface); box-shadow: 0 8px 25px #00000026; }
+.refinement-display-settings label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.refinement-operation-bar { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 13px; border-bottom: 1px solid var(--refinement-border); background: var(--refinement-raised); }
+.refinement-operation-context { margin-right: auto; min-width: 0; padding-left: 9px; border-left: 2px solid var(--refinement-accent); }
+.refinement-operation-context strong { display: block; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.refinement-operation-context > span { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; max-width: 350px; }
+.refinement-operation-bar .refinement-segmented { border-color: transparent; padding: 0; }
+.refinement-operation-bar button { font-size: 11px; padding: 4px 6px; }
+.refinement-operation-bar > button { min-height: 30px; background: var(--refinement-surface); }
+.refinement-view-grid { display: grid; gap: 1px; flex: 1 1 0; min-height: 0; background: var(--refinement-border); }
+.refinement-view-grid.quad { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.refinement-view { min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--bg); }
+.refinement-preview-expanded { position: fixed; inset: clamp(4px, 1vw, 12px); z-index: 1000; border: 1px solid var(--refinement-border); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 100vmax #0008; }
+.refinement-preview-expanded .refinement-view-grid { flex: 1 1 0; min-height: 0; }
+.refinement-page .refinement-preview-expanded .refinement-view-grid .refinement-view { height: auto; min-height: 0; }
+.refinement-view-name { position: absolute; z-index: 2; left: 12px; right: 12px; top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 6px; pointer-events: none; font-size: 10px; color: var(--muted); }
+.refinement-view-name > span { padding: 4px 8px; border: 1px solid var(--refinement-border); border-radius: 5px; background: color-mix(in srgb, var(--refinement-surface) 90%, transparent); }
+.refinement-view-name button { pointer-events: auto; font-size: 10px; min-height: 26px; padding: 2px 6px; background: var(--refinement-surface); }
+.refinement-view-name button svg { width: 12px; height: 12px; }
+.refinement-canvas { position: absolute; inset: 0; touch-action: none; }
+.refinement-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.refinement-page .refinement-instance-label { position: absolute; transform: translate(-50%, -50%); min-height: 24px; padding: 2px 6px; font-size: 11px; font-weight: 500; background: color-mix(in srgb, var(--refinement-surface) 94%, transparent); color: var(--text); pointer-events: auto; border-radius: 4px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; border-color: #d3ac25; box-shadow: 0 1px 4px #0002; }
+.refinement-view-grid:not([data-tool="browse"]) .refinement-instance-label { pointer-events: none; }
+/* 操作提示与坐标说明在宽屏同排；窄屏允许自然换行，坐标说明仍贴右，避免挤压画布。 */
+.refinement-coordinate-caption { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 16px; flex: 0 0 auto; margin: 0; padding: 8px 13px; font-size: 10px; line-height: 1.8; color: var(--muted); border-top: 1px solid var(--refinement-border); background: var(--refinement-surface); }
+.refinement-coordinate-caption > span { min-width: 0; overflow-wrap: anywhere; }
+.refinement-coordinate-caption > span:last-child { margin-left: auto; text-align: right; }
+.refinement-view-message { position: absolute; inset: 45% 15px auto; color: var(--muted); text-align: center; font-size: 12px; }
+
+.refinement-parameters { border-left: 1px solid var(--refinement-border); padding: 18px 16px; }
+.refinement-inspector-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.refinement-inspector-title h2, .refinement-workflow h2 { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 17px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.refinement-inspector-title h2 svg, .refinement-workflow h2 svg { width: 20px; height: 20px; color: var(--refinement-accent); }
+.refinement-inspector-title > span { color: var(--refinement-accent); font-size: 10px; white-space: nowrap; padding: 3px 7px; border-radius: 4px; background: var(--refinement-selected); }
+.refinement-help { color: var(--muted); font-size: 11px; line-height: 1.7; margin: 7px 0; overflow-wrap: anywhere; }
+.refinement-dimensions { margin: 16px 0; padding: 10px; border: 1px solid var(--refinement-border); border-radius: 7px; background: var(--refinement-raised); font-size: 12px; }
+.refinement-dimensions > summary { color: var(--text); line-height: 1.6; }
+.refinement-dimensions > summary > svg:first-child { color: var(--refinement-accent); }
+.refinement-dimensions summary small { display: block; font-size: 10px; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.refinement-dimensions .refinement-field { margin-top: 12px; }
+.refinement-dimensions .refinement-apply { margin-top: 12px; }
+.refinement-notice { border-left: 2px solid var(--orange); border-radius: 0 5px 5px 0; padding: 8px 10px; font-size: 11px; line-height: 1.8; background: color-mix(in srgb, var(--orange) 8%, transparent); }
+.refinement-lock { width: 100%; color: var(--muted); font-weight: 500; }
+.refinement-lock[aria-pressed="true"] { background: color-mix(in srgb, var(--orange) 8%, var(--refinement-surface)); color: var(--orange); border-color: color-mix(in srgb, var(--orange) 40%, var(--refinement-border)); }
+.refinement-fields { display: grid; gap: 18px; margin: 20px 0 15px; }
+.refinement-field { display: grid; gap: 7px; font-size: 12px; min-width: 0; }
+.refinement-field > label { font-weight: 500; }
+.refinement-field label span, .refinement-field > span { color: var(--muted); font-size: 11px; font-weight: 400; }
+.refinement-number-stepper { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 5px; }
+.refinement-number-stepper button { padding: 5px; color: var(--muted); }
+.refinement-number-stepper input { text-align: center; }
+.refinement-apply { width: 100%; }
+/* 质心沿用已选定的圆形轴标读数样式；数值不加边框或底色，保持只读结果的视觉语义。 */
+.refinement-coordinate-block { container: refinement-coordinates / inline-size; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 22px; font-size: 11px; color: var(--muted); }
+.refinement-coordinate-block > span { display: flex; align-items: center; gap: 6px; }
+.refinement-coordinate-block dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 15px 0 0; }
+.refinement-coordinate-block dl > div { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; }
+.refinement-coordinate-block dt { display: grid; place-items: center; flex: 0 0 auto; width: 19px; height: 19px; border-radius: 50%; color: var(--refinement-axis-text); background: var(--refinement-axis-background); font-size: 11px; font-weight: 500; line-height: 18px; }
+.refinement-coordinate-block dd { min-width: 0; margin: 0; color: var(--text); font-size: 12px; font-weight: 600; line-height: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@container refinement-coordinates (max-width: 238px) {
+  .refinement-coordinate-block dl { gap: 2px; }
+  .refinement-coordinate-block dl > div { gap: 2px; }
+  .refinement-coordinate-block dt { width: 17px; height: 17px; }
+}
+.refinement-member-details { margin-top: 20px; font-size: 11px; color: var(--muted); line-height: 1.8; }
+.refinement-object-actions { margin-top: 14px; }
+.refinement-object-actions button { width: 100%; color: var(--refinement-accent); }
+.refinement-version-name { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 12px; color: var(--muted); }
+.refinement-version-name label { margin-top: 12px; }
+.refinement-workflow-eyebrow { color: var(--refinement-accent); font-size: 11px; display: block; margin-bottom: 8px; }
+.refinement-group-name-field { margin-top: 22px; }
+.refinement-workflow h3 { font-size: 12px; font-weight: 600; margin: 24px 0 10px; }
+.refinement-workflow-members { list-style: none; padding: 0; margin: 0 0 15px; }
+.refinement-workflow-members li { padding: 10px; margin: 6px 0; border: 1px solid var(--refinement-border); border-radius: 6px; background: var(--refinement-raised); font-size: 12px; overflow-wrap: anywhere; }
+.refinement-workflow-members small { color: var(--muted); display: block; font-size: 11px; margin-top: 4px; }
+.refinement-workflow-confirm { display: grid; gap: 8px; margin-top: 24px; }
+.refinement-swap-preview { padding: 15px 8px; margin: 15px 0; border: 1px solid var(--refinement-border); border-radius: 6px; background: var(--refinement-selected); font-size: 11px; text-align: center; }
+.refinement-swap-preview strong { color: var(--refinement-accent); font-size: 13px; overflow-wrap: anywhere; }
+
+.refinement-metrics { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 20px; margin: 12px 24px 0; border: 1px solid var(--refinement-border); border-radius: 8px; padding: 12px 18px; background: var(--refinement-surface); }
+.refinement-metrics > div { min-width: 0; }
+.refinement-metrics > div + div { border-left: 1px solid var(--line); padding-left: 20px; }
+.refinement-metrics > div > span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+.refinement-metrics > div > span svg { width: 14px; height: 14px; color: var(--refinement-accent); }
+.refinement-metrics p { margin: 0; color: var(--muted); font-size: 11px; }
+.refinement-metrics strong { color: var(--text); font-size: 22px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.refinement-metrics small { display: block; font-size: 11px; line-height: 1.6; color: var(--muted); margin-top: 4px; }
+.refinement-check-result > strong { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 8px; border-radius: 5px; background: color-mix(in srgb, currentColor 8%, transparent); }
+.refinement-check-result details { font-size: 11px; color: var(--muted); margin-top: 5px; }
+.refinement-check-result ul { padding-left: 15px; line-height: 1.8; max-height: 200px; overflow: auto; }
+.refinement-status { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 24px 12px; color: var(--muted); font-size: 10px; }
+.refinement-status p { flex-basis: 100%; color: var(--orange); margin: 0; }
+.refinement-status button { font-size: 11px; margin-left: 10px; }
+.refinement-page .refinement-danger { color: var(--refinement-danger); }
+.refinement-page .refinement-success { color: var(--green); }
+.refinement-page .refinement-pending { color: var(--refinement-accent); }
+/* 加载及失败提示以整个视口为基准居中，定位范围仅覆盖文案，不遮挡导航与返回按钮。 */
+.refinement-loading { position: fixed; top: 50dvh; left: 50%; width: calc(100% - 48px); transform: translate(-50%, -50%); text-align: center; }
+.refinement-loading h2 { margin: 0; }
+.refinement-loading p { margin: 12px 0 0; color: var(--refinement-danger); overflow-wrap: anywhere; }
+.refinement-leave-dialog { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--refinement-border); border-radius: 10px; padding: 24px; background: var(--refinement-surface); color: var(--text); box-shadow: 0 16px 48px #0003; }
+.refinement-leave-dialog::backdrop { background: #0008; }
+.refinement-leave-dialog h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.refinement-leave-dialog h2 svg { color: var(--refinement-accent); width: 20px; height: 20px; }
+.refinement-leave-dialog p { font-size: 13px; line-height: 1.8; color: var(--muted); }
+.refinement-leave-dialog > div { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 20px; }
+.refinement-spinning { animation: refinement-spin 1s linear infinite; }
+@keyframes refinement-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1150px) {
+  .refinement-workspace { grid-template-columns: 184px minmax(0, 1fr) 262px; margin: 0 14px; }
+  .refinement-header { padding: 14px; }
+  .refinement-parameters { padding: 16px 12px; }
+  .refinement-objects { padding: 16px 9px; }
+  .refinement-segmented button { padding: 3px 6px; }
+  .refinement-view-toolbar { padding: 8px 10px; }
+  .refinement-metrics { margin-left: 14px; margin-right: 14px; }
+}
+@media (max-width: 900px) {
+  .refinement-page { display: block; }
+  .refinement-workspace { grid-template-columns: 190px minmax(0, 1fr); }
+  .refinement-objects, .refinement-parameters { overflow: visible; }
+  .refinement-parameters { grid-column: 1/-1; border-left: 0; border-top: 1px solid var(--refinement-border); }
+  .refinement-view-grid { flex: 0 0 auto; }
+  .refinement-view { height: clamp(340px, 58dvh, 700px); }
+  .refinement-view-grid.quad .refinement-view { height: clamp(200px, 29dvh, 350px); }
+  .refinement-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .refinement-lock, .refinement-apply { max-width: 300px; }
+  .refinement-operation-context { flex-basis: 100%; }
+  .refinement-display-settings > div { left: 0; right: auto; }
+}
+@media (max-width: 580px) {
+  .refinement-header { padding: 15px 9px; }
+  .refinement-header > div { flex-wrap: wrap; gap: 8px; }
+  .refinement-header h1 { font-size: 18px; }
+  .refinement-header .refinement-header-actions { gap: 6px; margin-left: 0; }
+  .refinement-header-actions > span { width: 100%; }
+  .refinement-header-actions button { padding: 5px 8px; }
+  .refinement-workspace { grid-template-columns: minmax(0, 1fr); margin: 0 9px; }
+  .refinement-objects { border-right: 0; border-bottom: 1px solid var(--refinement-border); padding: 13px 10px; }
+  .refinement-object-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; max-height: 300px; overflow: auto; }
+  .refinement-group { grid-column: 1/-1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .refinement-group-heading, .refinement-child-group { grid-column: 1/-1; }
+  .refinement-object > button[data-instance] { padding: 8px 4px; gap: 4px; }
+  .refinement-object-mark { width: 24px; }
+  .refinement-object-mark > svg { width: 20px; height: 20px; }
+  .refinement-page button.refinement-visibility { margin-right: 2px; flex-basis: 24px; width: 24px; }
+  .refinement-view-toolbar { padding: 8px; }
+  .refinement-view-toolbar > .refinement-segmented { width: 100%; gap: 2px; }
+  .refinement-view-toolbar > .refinement-segmented button { flex: 1; gap: 4px; padding: 3px 4px; font-size: 11px; }
+  .refinement-view-toolbar > .refinement-segmented button svg { width: 13px; height: 13px; }
+  .refinement-view-actions { width: 100%; justify-content: space-between; gap: 2px; }
+  .refinement-view-actions > button, .refinement-display-settings > summary { padding: 4px; gap: 4px; }
+  .refinement-operation-bar { padding: 9px; gap: 7px; }
+  .refinement-operation-bar .refinement-segmented { flex-wrap: wrap; gap: 2px; }
+  .refinement-operation-bar button { gap: 4px; padding: 4px; }
+  .refinement-operation-bar button svg { width: 14px; height: 14px; }
+  .refinement-view { height: clamp(280px, 52dvh, 520px); }
+  .refinement-view-grid.quad { grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(4, minmax(0, 1fr)); }
+  .refinement-view-grid.quad .refinement-view { height: clamp(200px, 34dvh, 320px); }
+  .refinement-fields { grid-template-columns: 1fr; }
+  .refinement-metrics { margin: 12px 9px 0; padding: 13px 14px; grid-template-columns: 1fr 1fr; gap: 16px 12px; }
+  .refinement-metrics > div + div { padding-left: 0; border-left: 0; }
+  .refinement-check-result { grid-column: 1/-1; padding-top: 12px; border-top: 1px solid var(--line); }
+  .refinement-status { padding: 10px 9px; }
+}
+@media (max-width: 360px) {
+  .refinement-view-toolbar > .refinement-segmented button { flex-direction: column; gap: 1px; }
+  .refinement-object-list { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 901px) and (max-height: 650px) {
+  .refinement-page { display: block; }
+  .refinement-objects, .refinement-parameters { max-height: calc(100dvh - 160px); }
+  .refinement-view-grid { flex: 0 0 auto; }
+  .refinement-view { height: clamp(260px, 52dvh, 420px); }
+  .refinement-view-grid.quad .refinement-view { height: clamp(140px, 26dvh, 210px); }
+}
+@media (max-width: 580px) and (max-height: 600px) {
+  .refinement-loading { position: static; width: auto; padding: 32px 16px; transform: none; }
+  .refinement-preview-expanded .refinement-view-grid.quad { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+  .refinement-preview-expanded .refinement-coordinate-caption { display: none; }
+}
+@media (pointer: coarse) { .refinement-page :where(.refinement-header, .refinement-workspace, .refinement-status) :is(button, input:not([type="checkbox"]), select, summary) { min-height: 42px; } }
+@media (prefers-reduced-motion: reduce) { .refinement-page *, .refinement-leave-dialog * { animation: none; transition: none; } }

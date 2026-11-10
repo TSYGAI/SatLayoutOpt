@@ -1,33 +1,24 @@
 /**
  * 文件说明：模型上传页与模型设置页的共享预览控制器，负责模型库、页面选择、Z 轴朝上的三维场景与内存预览。
- * 两页分别保存选中模型与相机状态；独立模块负责 GLB 资源和安全包络显示，精确几何由后端负责。
+ * 生成队列、已有资源读取队列和网格缓存属于应用会话；设置页兼容空模型库与重复草稿清理，精确几何由后端负责。
+ * 设置页通过独立搜索控制器按设备名称和文件名检索，并接收模型名称摘要用于批量进度；上传页仍按原始文件名管理模型。
  */
 
 import * as THREE from 'three';
+import { formatParameterNumber } from '../../utils/number-format.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { disposeOrbitControls } from '../../components/orbit-controls-lifecycle.js';
+import { PreviewRenderer } from '../../components/preview-renderer.js';
 import { createOrientationGizmo } from '../../components/orientation-gizmo.js';
 import { showToast } from '../../components/toast.js';
 import { restorePagePosition } from '../../app/page-position-cache.js';
 import {
   checkHealth,
-  deleteModel,
-  deleteModels,
-  getFaceMapping,
-  getInteractionPreviewManifest,
-  getPreviewManifest,
+  getPreviewCacheConfig,
+  getModelSearchConfig,
   getPreviewQualityConfig,
-  getPreviewRuntimeCache,
   listModels,
-  resolveApiUrl,
-  savePreviewRuntimeCache,
-  uploadModel,
 } from '../../api/model-upload-api.js';
-import {
-  deserializePreviewRuntimeCache,
-  serializePreviewRuntimeCache,
-} from './preview-runtime-cache.js';
 import {
   createInteractionQualityState,
   createPreviewTransitionState,
@@ -50,12 +41,17 @@ import {
 } from '../model-settings/model-settings-state.js';
 import { createModelSettingPreviewTools } from '../model-settings/model-setting-preview-tools.js';
 import { createModelEnvelopePreview } from '../model-settings/model-envelope-preview.js';
-import { disposeObject, loadGlb, prepareMappingEntries } from './model-preview-resources.js';
+import { disposeObject } from './model-preview-resources.js';
 import { createCoordinateAxes, setCoordinateAxesSize } from '../../components/coordinate-axes.js';
+import { createModelDeletionActions } from './model-upload-deletion.js';
+import { createModelUploadActions } from './model-upload-actions.js';
+import { createPreviewResources, measurePreviewBytes } from './preview-resource-loader.js';
+import { createPreviewLoadQueue } from './preview-load-queue.js';
+import { applySourceDisplayTransform } from '../model-settings/coordinate-frame.js';
+import { createCoordinateFramePreview } from '../model-settings/coordinate-frame-preview.js';
+import { createModelSearchSelect } from '../model-settings/model-search-select.js';
 
-const VALID_EXTENSIONS = new Set(['stp', 'step']);
 const ARTIFACT_LABELS = { failed: '生成失败', pending: '等待生成', processing: '正在转换', ready: '预览就绪' };
-const PREVIEW_CACHE_LIMIT = 4;
 const GRID_DIVISIONS = 24;
 const GRID_MODEL_RADIUS_FACTOR = 3;
 const GRID_BOUNDS_MARGIN = 1.15;
@@ -73,8 +69,10 @@ const SCENE_PALETTES = {
   light: { background: 0xe8eef3, preview: [0x58, 0x6d, 0x7d], edge: 0x41535f, gridOpacity: 0.62 },
 };
 const state = {
-  models: [], selectedModel: null, selectedIds: new Set(), search: '', loadController: null, loadToken: 0,
+  models: [], modelsLoaded: false, selectedModel: null, selectedIds: new Set(), search: '', loadToken: 0, pendingUploads: 0,
+  modelsRefreshToken: 0, deleting: false, onRequestDelete: null,
   scene: null, mappingEntries: [], previewManifest: null, interactionManifest: null, previewCache: new Map(),
+  previewCacheConfig: null,
   qualityConfig: normalizePreviewQualityConfig(DEFAULT_PREVIEW_QUALITY_CONFIG), interactionQuality: null,
   previewTransition: null,
   isInteracting: false, idleTimer: null, lastRenderAt: 0,
@@ -84,10 +82,35 @@ const state = {
   pageSelections: createModelPageSelections(),
   selectFirstModel: false,
   modelSettings: null,
+  settingsNotifiedModelId: undefined,
+  coordinateFrameDraft: null,
   connection: { message: '连接检查中', error: false },
 };
 let activePageLifecycle = null;
 let deferredPreviewDisposeTimer = null;
+const { requestModelDeletion } = createModelDeletionActions({
+  state, getLifecycle: () => activePageLifecycle, renderModelList, refreshModels,
+  evictCachedPreviews, clearModelView, clearPreview, clearModelScene, syncPreviewQueue,
+});
+const { uploadFiles } = createModelUploadActions({
+  state, getLifecycle: () => activePageLifecycle, renderModelList, refreshModels, selectModel, syncPreviewQueue,
+});
+
+const previewResources = createPreviewResources({ getScenePalette, edgeOpacity: TOPOLOGY_EDGE_OPACITY });
+const previewQueue = createPreviewLoadQueue({
+  load: previewResources.loadTier,
+  onResult: acceptBackgroundPreview,
+  onChange: renderPreviewQueueState,
+  disposeResult: (result) => disposePreview(result.preview),
+  canStartDetail: () => state.pendingUploads === 0,
+});
+const modelSearchSelect = createModelSearchSelect({
+  getModels: getSettingsPreviewModels,
+  getExistingModels: () => state.models,
+  getSelectedModel: () => state.selectedModel,
+  getEmptyLabel: getSettingsModelEmptyLabel,
+  onSelect: selectModel,
+});
 
 /** 深拷贝包含嵌套质心和安装点对象的模型设置，避免页面草稿修改模型列表缓存。 */
 function cloneModelSettings(settings = {}) {
@@ -95,25 +118,25 @@ function cloneModelSettings(settings = {}) {
     ...settings,
     center_of_mass: settings?.center_of_mass ? { ...settings.center_of_mass } : null,
     installation_point: settings?.installation_point ? { ...settings.installation_point } : null,
+    coordinate_frame: settings?.coordinate_frame ? structuredClone(settings.coordinate_frame) : undefined,
   };
 }
 
-/** 返回当前页面允许应用到共享预览的设置；上传页固定使用原始 STEP 姿态。 */
+/** 返回当前页面的预览设置；上传页使用当前模型坐标，单位比例及摆放姿态由设置页应用。 */
 function getCurrentPreviewSettings() {
-  if (state.pageMode !== 'settings') return {};
+  if (state.pageMode !== 'settings') return { coordinate_frame: state.selectedModel?.settings?.coordinate_frame };
   return state.modelSettings || state.selectedModel?.settings || {};
 }
 
-/** 按模型统一缩放比例调整相机距离和裁剪面，保持当前观察方向与固定 STEP 原点。 */
-function preservePreviewFramingForScale(previousScale, nextScale) {
+/** 比例编辑保持相机位置，让实际尺寸变化可见；只扩展裁剪范围，适配视图由用户主动触发。 */
+function updatePreviewClippingForScale(previousScale, nextScale) {
   const { camera, controls } = state.scene || {};
   if (!camera || !controls || !Number.isFinite(previousScale) || previousScale <= 0
     || !Number.isFinite(nextScale) || nextScale <= 0) return;
   const ratio = nextScale / previousScale;
   if (Math.abs(ratio - 1) < 1e-9) return;
-  camera.position.sub(controls.target).multiplyScalar(ratio).add(controls.target);
-  camera.near = Math.max(camera.near * ratio, 0.0001);
-  camera.far = Math.max(camera.far * ratio, camera.near + 1);
+  camera.near = Math.max(Math.min(camera.near, camera.near * ratio), 0.0001);
+  camera.far = Math.max(camera.far, camera.far * ratio, camera.near + 1);
   camera.updateProjectionMatrix();
   controls.update();
 }
@@ -138,6 +161,7 @@ function clearModelView(pageMode = state.pageMode) {
 function saveModelView() {
   window.clearTimeout(state.viewSaveTimer);
   state.viewSaveTimer = null;
+  if (state.coordinateFrameDraft) return;
   const { camera, controls, panOffset, modelRoot } = state.scene || {};
   if (!state.selectedModel || !modelRoot || !camera || !controls || !panOffset) return;
   state.pageSelections[state.pageMode] = state.selectedModel.id;
@@ -180,18 +204,25 @@ function restorePendingModelView() {
   return true;
 }
 
-/** 根据当前页面的内存选择和会话快照解析应显示的模型。 */
+/** 返回至少成功加载过简易或高清预览的模型；内存淘汰后的资源可重载，后端就绪标记不作为加载成功证据。 */
+function getSettingsPreviewModels() {
+  return state.models.filter((model) => previewQueue.get(model.id)?.hasLoadedPreview
+    || (state.selectedModel?.id === model.id && Boolean(state.scene?.modelRoot)));
+}
+
+/** 根据页面选择和会话快照解析模型；设置页仅恢复可用预览，暂未加载的历史选择保留至有可用候选。 */
 function resolveCurrentPageModel(cachedView) {
   const pageMode = state.pageMode;
   const preferredModelId = state.pageSelections[pageMode]
     || readStoredModelSelection(pageMode)
     || cachedView?.modelId;
+  const candidates = pageMode === 'settings' ? getSettingsPreviewModels() : state.models;
   const preferredModel = preferredModelId
-    ? state.models.find((model) => model.id === preferredModelId)
+    ? candidates.find((model) => model.id === preferredModelId)
     : null;
-  if (preferredModelId && !preferredModel) clearModelView(pageMode);
-  const model = preferredModel || (state.selectFirstModel ? state.models[0] : null);
-  state.pageSelections[pageMode] = model?.id || null;
+  if (preferredModelId && !state.models.some((model) => model.id === preferredModelId)) clearModelView(pageMode);
+  const model = preferredModel || (state.selectFirstModel ? candidates[0] : null);
+  if (model || pageMode !== 'settings') state.pageSelections[pageMode] = model?.id || null;
   if (model) writeStoredModelSelection(pageMode, model.id);
   return model;
 }
@@ -219,7 +250,7 @@ function formatSize(bytes) {
   let value = bytes;
   let index = -1;
   while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
-  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[index]}`;
+  return `${formatParameterNumber(value)} ${units[index]}`;
 }
 
 /** 把后端 UTC 时间格式化为紧凑的本地时间。 */
@@ -280,69 +311,25 @@ function createModelRow(model) {
   status.textContent = artifactState === 'pending' && hasInteractionPreview
     ? '快速预览就绪'
     : ARTIFACT_LABELS[artifactState] || '等待生成';
-  status.title = model.derivatives?.message || status.textContent;
+  const queued = previewQueueLabel(model);
+  if (queued) { status.className = `artifact-state ${queued.kind}`; status.textContent = queued.text; }
+  status.title = queued?.error || model.derivatives?.message || status.textContent;
   row.append(checkbox, main, status);
   return row;
 }
 
-/** 打开或关闭模型设置页的模型列表，并按需把焦点移入列表或返回触发按钮。 */
-function setModelSettingsModelSelectOpen(open, focusTarget = null) {
-  const selector = document.getElementById('model-settings-model-select');
-  const control = selector?.closest('.model-settings-select-control');
-  const options = document.getElementById('model-settings-model-options');
-  if (!selector || !control || !options) return;
-  const shouldOpen = Boolean(open && !selector.disabled && state.models.length);
-  selector.setAttribute('aria-expanded', String(shouldOpen));
-  control.classList.toggle('open', shouldOpen);
-  options.hidden = !shouldOpen;
-  if (focusTarget === 'trigger') selector.focus();
-  if (shouldOpen && focusTarget === 'option') {
-    (options.querySelector('[aria-selected="true"]') || options.querySelector('[role="option"]'))?.focus();
-  }
-}
-
-/** 将键盘焦点在模型选项间循环移动。 */
-function moveModelSettingsOptionFocus(options, offset) {
-  const items = [...options.querySelectorAll('[role="option"]')];
-  if (!items.length) return;
-  const currentIndex = items.indexOf(document.activeElement);
-  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + offset + items.length) % items.length;
-  items[nextIndex].focus();
-}
-
-/** 更新模型设置页的已上传模型选择菜单，并同步当前选中的预览对象。 */
-function renderModelSettingsModelSelect() {
-  const selector = document.getElementById('model-settings-model-select');
-  const value = document.getElementById('model-settings-model-select-value');
-  const options = document.getElementById('model-settings-model-options');
-  if (!selector || !value || !options) return;
-  options.replaceChildren();
-  setModelSettingsModelSelectOpen(false);
-  if (!state.models.length) {
-    value.textContent = '暂无已上传模型';
-    selector.dataset.value = '';
-    selector.disabled = true;
-    return;
-  }
-  const currentModel = state.models.find((model) => model.id === state.selectedModel?.id) || state.models[0];
-  state.models.forEach((model) => {
-    const option = document.createElement('button');
-    option.className = 'model-settings-model-option';
-    option.type = 'button';
-    option.role = 'option';
-    option.tabIndex = -1;
-    option.dataset.modelId = model.id;
-    option.setAttribute('aria-selected', String(model.id === currentModel.id));
-    const label = document.createElement('span');
-    label.className = 'model-settings-model-option-label';
-    label.textContent = model.filename;
-    option.append(label);
-    options.append(option);
+/** 返回设置页没有可用预览时的原因，候选资格仍由现有预览队列决定。 */
+function getSettingsModelEmptyLabel() {
+  if (!state.models.length) return '暂无已上传模型';
+  const waiting = state.models.some((model) => {
+    const entry = previewQueue.get(model.id);
+    return !entry || [entry.interaction, entry.detail].some((status) => ['pending', 'loading'].includes(status));
   });
-  selector.disabled = false;
-  selector.dataset.value = currentModel.id;
-  value.textContent = currentModel.filename;
+  return waiting ? '等待简易预览就绪' : '暂无可用预览，请先重试';
 }
+
+/** 将模型变更同步到独立搜索选择器，保留其本会话关键词、最近记录与输入焦点。 */
+function renderModelSettingsModelSelect() { modelSearchSelect.render(); }
 
 /** 按搜索关键字渲染模型列表，并同步选择数量和删除按钮。 */
 function renderModelList() {
@@ -353,7 +340,7 @@ function renderModelList() {
   const keyword = state.search.trim().toLocaleLowerCase('zh-CN');
   const visibleModels = state.models.filter((model) => model.filename.toLocaleLowerCase('zh-CN').includes(keyword));
   list.replaceChildren();
-  document.getElementById('model-count').textContent = `${state.models.length} 个模型`;
+  document.getElementById('model-count').textContent = state.deleting ? '正在删除…' : `${state.models.length} 个模型`;
   if (!visibleModels.length) {
     const empty = document.createElement('div');
     empty.className = 'list-empty';
@@ -366,8 +353,10 @@ function renderModelList() {
     window.lucide?.createIcons({ nodes: [empty] });
   } else visibleModels.forEach((model) => list.append(createModelRow(model)));
   const deleteButton = document.getElementById('delete-selected');
-  deleteButton.disabled = state.selectedIds.size === 0;
-  deleteButton.title = state.selectedIds.size ? `删除选中的 ${state.selectedIds.size} 个模型` : '删除选中模型';
+  deleteButton.disabled = state.deleting || state.selectedIds.size === 0;
+  deleteButton.setAttribute('aria-busy', String(state.deleting));
+  deleteButton.title = state.deleting ? '正在删除所选模型，请稍候'
+    : state.selectedIds.size ? `删除选中的 ${state.selectedIds.size} 个模型` : '删除选中模型';
   selectAll.disabled = state.models.length === 0;
   selectAll.checked = state.models.length > 0 && state.selectedIds.size === state.models.length;
   selectAll.indeterminate = state.selectedIds.size > 0 && state.selectedIds.size < state.models.length;
@@ -394,6 +383,7 @@ function requestSceneRender() {
     }
     state.lastRenderAt = now;
     sceneState.settingsTools?.updateScreenScale();
+    sceneState.coordinateFramePreview?.resize();
     sceneState.renderer.render(sceneState.scene, sceneState.camera);
     renderOrientationGizmo(sceneState);
     if (state.isInteracting) requestSceneRender();
@@ -494,11 +484,11 @@ function applySceneTheme() {
   requestSceneRender();
 }
 
-/** 从预览场景卸载当前模型，并保留完整双 LOD、拓扑映射及渲染资源供缓存复用。 */
-function detachCurrentPreview() {
-  state.scene?.envelopePreview?.clear();
+/** 卸载模型并移交预览资源；同一模型升级质量时保留包络与设置覆盖层上下文。 */
+function detachCurrentPreview({ preserveOverlays = false } = {}) {
+  if (!preserveOverlays) state.scene?.envelopePreview?.clear();
   if (!state.scene?.interactionRoot && !state.scene?.detailRoot) return null;
-  state.scene.settingsTools?.clearPreview();
+  if (!preserveOverlays) state.scene.settingsTools?.clearPreview();
   const preview = {
     interactionRoot: state.scene.interactionRoot,
     detailRoot: state.scene.detailRoot,
@@ -522,35 +512,42 @@ function detachCurrentPreview() {
   return preview;
 }
 
-/** 保存近期模型预览，优先保留两个页面当前选择并释放最久未使用的其他 GPU 资源。 */
+/** 在数量和数组字节预算内保存近期预览；优先保留页面选择，超预算仍释放以免大模型耗尽内存。 */
 function cachePreview(modelId, preview) {
   const existing = state.previewCache.get(modelId);
   if (existing && existing !== preview) disposePreview(existing);
   state.previewCache.delete(modelId);
   state.previewCache.set(modelId, preview);
-  while (state.previewCache.size > PREVIEW_CACHE_LIMIT) {
+  const budget = state.previewCacheConfig;
+  while (state.previewCache.size && (!budget || state.previewCache.size > budget.modelLimit
+    || [...state.previewCache.values()].reduce((total, item) => total + measurePreviewBytes(item), 0) > budget.maxBytes)) {
     const pinnedModelIds = new Set(Object.values(state.pageSelections).filter(Boolean));
-    const evictedEntry = [...state.previewCache.entries()].find(([cachedModelId]) => !pinnedModelIds.has(cachedModelId));
-    if (!evictedEntry) break;
+    const evictedEntry = [...state.previewCache.entries()].find(([cachedModelId]) => !pinnedModelIds.has(cachedModelId))
+      || state.previewCache.entries().next().value;
     const [evictedId, evictedPreview] = evictedEntry;
     state.previewCache.delete(evictedId);
     disposePreview(evictedPreview);
   }
 }
 
-/** 通知模型设置页当前选择已经变化，并提供后端返回的完整设置。 */
+/** 预览挂载后通知设置页当前模型和全库名称摘要；质量升级不重复通知，避免覆盖草稿或取消保存。 */
 function notifyModelSettingsSelection() {
   if (state.pageMode !== 'settings') return;
+  const model = state.scene?.modelRoot ? state.selectedModel : null;
+  const modelId = model?.id || null;
+  if (state.settingsNotifiedModelId === modelId) return;
+  state.settingsNotifiedModelId = modelId;
   window.dispatchEvent(new CustomEvent(MODEL_SETTINGS_SELECTION_EVENT, {
     detail: {
-      model: state.selectedModel
-        ? { ...state.selectedModel, settings: cloneModelSettings(state.selectedModel.settings) }
+      models: state.models.map(({ id, filename }) => ({ id, filename })),
+      model: model
+        ? { ...model, settings: cloneModelSettings(model.settings) }
         : null,
     },
   }));
 }
 
-/** 把设置变换同步到当前双 LOD 与拓扑边线；可选择提交到控制器内存模型列表。 */
+/** 把设置变换同步到当前双 LOD 与拓扑边线；提交时更新内存模型设置和模型选择名称。 */
 export function applyCurrentModelPreviewSettings(settings, options = {}) {
   const transform = getModelPreviewTransform(settings);
   if (!transform) return false;
@@ -560,14 +557,13 @@ export function applyCurrentModelPreviewSettings(settings, options = {}) {
     state.selectedModel.settings = cloneModelSettings(settings);
     const storedModel = state.models.find((model) => model.id === state.selectedModel.id);
     if (storedModel) storedModel.settings = cloneModelSettings(settings);
+    renderModelSettingsModelSelect();
   }
   const roots = [state.scene?.interactionRoot, state.scene?.detailRoot, state.scene?.edgeOverlay].filter(Boolean);
   roots.forEach((root) => {
-    root.scale.setScalar(transform.scale);
-    root.rotation.set(...transform.rotation, 'XYZ');
-    root.updateMatrixWorld(true);
+    applySourceDisplayTransform(root, transform, settings.coordinate_frame);
   });
-  if (state.scene?.modelRoot) preservePreviewFramingForScale(previousTransform?.scale, transform.scale);
+  if (state.scene?.modelRoot) updatePreviewClippingForScale(previousTransform?.scale, transform.scale);
   if (state.scene?.modelRoot) {
     fitGridToBounds(new THREE.Box3().setFromObject(state.scene.modelRoot));
     if (state.previewManifest || state.interactionManifest) renderModelStats(state.previewManifest || state.interactionManifest);
@@ -575,13 +571,54 @@ export function applyCurrentModelPreviewSettings(settings, options = {}) {
   state.scene?.settingsTools?.setContext({
     enabled: state.pageMode === 'settings' && Boolean(state.selectedModel),
     modelId: state.selectedModel?.id || null,
-    detailRoot: state.scene?.detailRoot || null,
+    detailRoot: state.scene?.detailRoot || (state.mappingEntries.length ? state.scene?.interactionRoot : null),
     mappingEntries: state.mappingEntries,
     settings: state.pageMode === 'settings' ? settings : {},
     transform,
   });
+  if (state.coordinateFrameDraft?.modelId === state.selectedModel?.id) applyCoordinateFrameDraft();
+  else { state.coordinateFrameDraft = null; state.scene?.coordinateFramePreview?.update(null); }
   requestSceneRender();
   return true;
+}
+
+/** 在初始参考下预览坐标草稿，保留当前比例、单位和姿态，避免编辑时退回原始尺寸。 */
+function applyCoordinateFrameDraft() {
+  const draft = state.coordinateFrameDraft;
+  if (!draft || !state.scene) return;
+  const settings = getCurrentPreviewSettings();
+  const transform = getModelPreviewTransform(settings);
+  if (!transform) return;
+  [state.scene.interactionRoot, state.scene.detailRoot, state.scene.edgeOverlay].filter(Boolean)
+    .forEach((root) => applySourceDisplayTransform(root, transform, undefined));
+  state.scene.settingsTools?.clearPreview();
+  state.scene.coordinateFramePreview?.update(draft.frame, settings.center_of_mass, transform);
+}
+
+/** 进入或退出坐标系草稿预览；null 清理可重复调用，仅为仍选中的原模型恢复旧草稿视角。 */
+export function setCoordinateFrameDraft(frame) {
+  if (!state.scene || state.pageMode !== 'settings') return;
+  const entering = frame && !state.coordinateFrameDraft;
+  const previous = state.coordinateFrameDraft;
+  let view = previous?.view;
+  if (entering) {
+    saveModelView();
+    view = readModelView();
+  }
+  const savedFrame = previous?.savedFrame ?? JSON.stringify(getCurrentPreviewSettings().coordinate_frame);
+  state.coordinateFrameDraft = frame ? { modelId: state.selectedModel?.id, frame, view, savedFrame } : null;
+  if (frame) { applyCoordinateFrameDraft(); if (entering) fitModelView(); }
+  else {
+    state.scene.coordinateFramePreview?.update(null);
+    applyCurrentModelPreviewSettings(getCurrentPreviewSettings());
+    if (previous && state.selectedModel && previous.modelId === state.selectedModel.id) {
+      if (previous.savedFrame === JSON.stringify(getCurrentPreviewSettings().coordinate_frame)) {
+        state.pendingViewSnapshot = previous.view;
+        restorePendingModelView();
+      } else fitModelView();
+    }
+  }
+  requestSceneRender();
 }
 
 /** 开启或关闭当前设置页的安装面拾取模式。 */
@@ -627,216 +664,9 @@ function evictCachedPreviews(modelIds) {
 /** 释放缓存预览的双 LOD 网格和其独立的 STEP 拓扑边线 GPU 资源。 */
 function disposePreview(preview) {
   state.scene?.settingsTools?.releasePreview(preview?.detailRoot);
+  state.scene?.settingsTools?.releasePreview(preview?.interactionRoot);
   new Set([preview?.interactionRoot, preview?.detailRoot, preview?.edgeOverlay].filter(Boolean))
     .forEach((object) => disposeObject(object));
-}
-
-/** 将最终合并网格转换为可持久化的紧凑属性数据，并拒绝不完整的渲染对象。 */
-function serializePreviewGeometry(geometry, includeNormals, label) {
-  const position = geometry?.getAttribute('position');
-  const normal = geometry?.getAttribute('normal');
-  const index = geometry?.getIndex();
-  if (!position || position.itemSize !== 3
-    || (index && index.itemSize !== 1)
-    || (includeNormals && (!normal || normal.itemSize !== 3))) {
-    throw new Error(`${label}网格数据不完整`);
-  }
-  const indices = index
-    ? Uint32Array.from(index.array)
-    : Uint32Array.from({ length: position.count }, (_, vertexIndex) => vertexIndex);
-  return {
-    positions: Float32Array.from(position.array),
-    ...(includeNormals ? { normals: Float32Array.from(normal.array) } : {}),
-    indices,
-  };
-}
-
-/** 校验缓存中的索引均引用指定顶点数量范围内的数据。 */
-function hasValidGeometryIndices(indices, vertexCount) {
-  for (let index = 0; index < indices.length; index += 1) {
-    if (indices[index] >= vertexCount) return false;
-  }
-  return true;
-}
-
-/** 判断缓存属性数组中的全部数值是否有限，避免异常数据破坏相机与渲染计算。 */
-function hasFiniteGeometryValues(values) {
-  for (let index = 0; index < values.length; index += 1) {
-    if (!Number.isFinite(values[index])) return false;
-  }
-  return true;
-}
-
-/** 从持久化属性数据恢复 Three.js BufferGeometry，并完成基础结构校验。 */
-function createPreviewGeometryFromCache(data, includeNormals, label) {
-  if (!data || typeof data !== 'object'
-    || !(data.positions instanceof Float32Array)
-    || !(data.indices instanceof Uint32Array)
-    || data.positions.length === 0
-    || data.positions.length % 3 !== 0
-    || data.indices.length === 0
-    || data.indices.length % (includeNormals ? 3 : 2) !== 0
-    || !hasFiniteGeometryValues(data.positions)
-    || !hasValidGeometryIndices(data.indices, data.positions.length / 3)
-    || (includeNormals && (!(data.normals instanceof Float32Array)
-      || data.normals.length !== data.positions.length
-      || !hasFiniteGeometryValues(data.normals)))) {
-    throw new Error(`${label}缓存结构无效`);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-  if (includeNormals) geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
-  geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-/** 从缓存中一次性创建表面和可选边线网格，任一数据段异常时释放已分配资源。 */
-function createPreparedPreviewFromCache(surfaceData, edgeData, label) {
-  let surfaceGeometry = null;
-  let edgeGeometry = null;
-  try {
-    surfaceGeometry = createPreviewGeometryFromCache(surfaceData, true, label);
-    edgeGeometry = edgeData ? createPreviewGeometryFromCache(edgeData, false, '拓扑边线') : null;
-    return createPreparedPreviewFromGeometries(surfaceGeometry, edgeGeometry);
-  } catch (error) {
-    surfaceGeometry?.dispose();
-    edgeGeometry?.dispose();
-    throw error;
-  }
-}
-
-/** 创建当前主题下已合并表面网格与可选拓扑边线覆盖层。 */
-function createPreparedPreviewFromGeometries(surfaceGeometry, edgeGeometry = null) {
-  let edgeOverlay = null;
-  try {
-    if (!surfaceGeometry) throw new Error('GLB 预览不包含可渲染网格');
-    surfaceGeometry.computeBoundingSphere();
-    const [red, green, blue] = getScenePalette().preview.map((value) => value / 255);
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(red, green, blue),
-      emissive: new THREE.Color(red * 0.1, green * 0.1, blue * 0.1),
-      emissiveIntensity: 1,
-      metalness: 0.08,
-      roughness: 0.64,
-      side: THREE.DoubleSide,
-      wireframe: false,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    const modelRoot = new THREE.Mesh(surfaceGeometry, baseMaterial);
-    modelRoot.name = 'STEP_PREVIEW_MERGED';
-    if (edgeGeometry) {
-      edgeGeometry.computeBoundingSphere();
-      const edgeMaterial = createTopologyEdgeMaterial();
-      edgeOverlay = new THREE.LineSegments(edgeGeometry, edgeMaterial);
-      edgeOverlay.name = 'STEP_TOPOLOGY_EDGES';
-      edgeOverlay.renderOrder = 1;
-    }
-    return { modelRoot, edgeOverlay };
-  } catch (error) {
-    surfaceGeometry?.dispose();
-    edgeGeometry?.dispose();
-    edgeOverlay?.material.dispose();
-    throw error;
-  }
-}
-
-/** 创建参考色拓扑边线材质，通过降低覆盖强度获得略细的视觉效果。 */
-function createTopologyEdgeMaterial() {
-  return new THREE.LineBasicMaterial({
-    color: getScenePalette().edge,
-    transparent: true,
-    opacity: TOPOLOGY_EDGE_OPACITY,
-    depthTest: true,
-    depthWrite: false,
-    toneMapped: false,
-  });
-}
-
-/** 将当前双 LOD、拓扑边线、清单和面映射提取为跨刷新缓存负载。 */
-function getPreviewRuntimeCachePayload() {
-  const sceneState = state.scene;
-  if (!sceneState?.interactionRoot || !sceneState.detailRoot || !state.interactionManifest
-    || !state.previewManifest || !state.mappingEntries.length) return null;
-  return {
-    interaction: serializePreviewGeometry(sceneState.interactionRoot.geometry, true, '交互预览'),
-    detail: serializePreviewGeometry(sceneState.detailRoot.geometry, true, '高清预览'),
-    edge: sceneState.edgeOverlay ? serializePreviewGeometry(sceneState.edgeOverlay.geometry, false, '拓扑边线') : null,
-    interactionManifest: state.interactionManifest,
-    previewManifest: state.previewManifest,
-    mappingEntries: state.mappingEntries,
-  };
-}
-
-/** 验证缓存恢复所需的清单基础字段，避免异常缓存破坏预览状态。 */
-function hasValidPreviewManifest(manifest) {
-  return manifest && typeof manifest === 'object'
-    && manifest.stats && typeof manifest.stats === 'object'
-    && Number.isFinite(manifest.stats.body_count)
-    && Number.isFinite(manifest.stats.face_count)
-    && Number.isFinite(manifest.stats.triangle_count)
-    && Array.isArray(manifest.bounds?.min)
-    && Array.isArray(manifest.bounds?.max)
-    && manifest.bounds.min.length === 3
-    && manifest.bounds.max.length === 3
-    && manifest.bounds.min.concat(manifest.bounds.max).every(Number.isFinite);
-}
-
-/** 将磁盘缓存负载还原为可直接接入当前 Three.js 场景的双 LOD 预览对象。 */
-function createPreviewFromRuntimeCache(payload) {
-  if (!payload || typeof payload !== 'object'
-    || !hasValidPreviewManifest(payload.interactionManifest)
-    || !hasValidPreviewManifest(payload.previewManifest)
-    || !Array.isArray(payload.mappingEntries)) {
-    throw new Error('预览缓存结构无效');
-  }
-  let interactionPreview = null;
-  let detailPreview = null;
-  try {
-    interactionPreview = createPreparedPreviewFromCache(payload.interaction, null, '交互预览');
-    detailPreview = createPreparedPreviewFromCache(payload.detail, payload.edge, '高清预览');
-    const triangleCount = detailPreview.modelRoot.geometry.getIndex().count / 3;
-    const mappingEntries = prepareMappingEntries(payload.mappingEntries, triangleCount);
-    return {
-      interactionRoot: interactionPreview.modelRoot,
-      detailRoot: detailPreview.modelRoot,
-      edgeOverlay: detailPreview.edgeOverlay,
-      interactionManifest: payload.interactionManifest,
-      previewManifest: payload.previewManifest,
-      mappingEntries,
-    };
-  } catch (error) {
-    if (interactionPreview?.modelRoot) disposeObject(interactionPreview.modelRoot);
-    if (interactionPreview?.edgeOverlay) disposeObject(interactionPreview.edgeOverlay);
-    if (detailPreview?.modelRoot) disposeObject(detailPreview.modelRoot);
-    if (detailPreview?.edgeOverlay) disposeObject(detailPreview.edgeOverlay);
-    throw error;
-  }
-}
-
-/** 读取并验证磁盘持久化预览缓存；缓存不可用时返回空以回退到 GLB 加载。 */
-async function loadPersistedPreview(modelId, signal) {
-  try {
-    const buffer = await getPreviewRuntimeCache(modelId, signal);
-    return buffer ? createPreviewFromRuntimeCache(deserializePreviewRuntimeCache(buffer, modelId)) : null;
-  } catch (error) {
-    if (error.name === 'AbortError') throw error;
-    console.warn(`预览持久缓存不可用，已回退 GLB 加载：${error.message}`);
-    return null;
-  }
-}
-
-/** 将已完成的当前模型预览异步写入后端磁盘缓存，失败不影响正在显示的模型。 */
-async function persistPreview(modelId) {
-  try {
-    const payload = getPreviewRuntimeCachePayload();
-    if (!payload) return;
-    await savePreviewRuntimeCache(modelId, serializePreviewRuntimeCache(modelId, payload));
-  } catch (error) {
-    console.warn(`预览持久缓存保存失败：${error.message}`);
-  }
 }
 
 /** 从预览场景移除当前模型并释放其 GPU 资源。 */
@@ -847,9 +677,7 @@ function clearModelScene() {
 
 /** 恢复预览面板为空状态。 */
 function clearPreview() {
-  state.loadController?.abort();
   window.clearTimeout(state.idleTimer);
-  state.loadController = null;
   state.idleTimer = null;
   state.lastRenderAt = 0;
   state.loadToken += 1;
@@ -1062,7 +890,7 @@ function initializeScene(lifecycleSignal) {
   const camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000000);
   camera.up.set(...SCENE_UP);
   camera.position.set(...EMPTY_PREVIEW_CAMERA_POSITION);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  const renderer = new PreviewRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(state.previewTransition.pixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1080,8 +908,9 @@ function initializeScene(lifecycleSignal) {
   grid.material.transparent = true;
   grid.material.opacity = getScenePalette().gridOpacity;
   scene.add(grid, axes, lighting);
+  const coordinateFramePreview = createCoordinateFramePreview({ scene, camera, renderer, requestRender: requestSceneRender });
   state.scene = {
-    container, scene, camera, renderer, controls, grid, axes, orientationGizmoContainer,
+    container, scene, camera, renderer, controls, grid, axes, orientationGizmoContainer, coordinateFramePreview,
     modelRoot: null, interactionRoot: null, detailRoot: null, edgeOverlay: null,
     activeQuality: '', renderQueued: false,
     panOffset: new THREE.Vector2(), panPointerId: null, panLastPosition: new THREE.Vector2(),
@@ -1104,6 +933,7 @@ function initializeScene(lifecycleSignal) {
   controls.addEventListener('start', beginPreviewInteraction);
   controls.addEventListener('change', () => {
     setCoordinateAxesSize(state.scene);
+    state.scene?.coordinateFramePreview?.resize();
     state.scene?.settingsTools?.updateScreenScale();
     scheduleModelViewSave();
     requestSceneRender();
@@ -1176,83 +1006,7 @@ function renderModelStats(manifest) {
   document.getElementById('stat-bodies').textContent = String(stats.body_count);
   document.getElementById('stat-faces').textContent = stats.face_count.toLocaleString('zh-CN');
   document.getElementById('stat-triangles').textContent = stats.triangle_count.toLocaleString('zh-CN');
-  document.getElementById('stat-bounds').textContent = size.map((value) => Number(value).toFixed(2)).join(' × ');
-}
-
-/** 把 GLB 中的逐面网格和拓扑线段分别合并为两个轻量渲染对象。 */
-function prepareLoadedModel(root) {
-  const surfaceGeometries = [];
-  const edgeGeometries = [];
-  let mergedGeometry = null;
-  let mergedEdgeGeometry = null;
-  let edgeOverlay = null;
-  root.updateMatrixWorld(true);
-  root.traverse((child) => {
-    if (!child.isMesh && !child.isLineSegments) return;
-    const geometry = child.geometry.clone();
-    geometry.applyMatrix4(child.matrixWorld);
-    if (child.isMesh) {
-      if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
-      surfaceGeometries.push(geometry);
-    } else edgeGeometries.push(geometry);
-  });
-  try {
-    if (!surfaceGeometries.length) throw new Error('GLB 预览不包含可渲染网格');
-    mergedGeometry = mergeGeometries(surfaceGeometries, false);
-    if (!mergedGeometry) throw new Error('GLB 逐面网格无法合并');
-    mergedGeometry.computeBoundingSphere();
-    const [red, green, blue] = getScenePalette().preview.map((value) => value / 255);
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(red, green, blue),
-      emissive: new THREE.Color(red * 0.1, green * 0.1, blue * 0.1),
-      emissiveIntensity: 1,
-      metalness: 0.08,
-      roughness: 0.64,
-      side: THREE.DoubleSide,
-      wireframe: false,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    const model = new THREE.Mesh(mergedGeometry, baseMaterial);
-    model.name = 'STEP_PREVIEW_MERGED';
-    if (edgeGeometries.length) {
-      mergedEdgeGeometry = mergeGeometries(edgeGeometries, false);
-      if (mergedEdgeGeometry) {
-        mergedEdgeGeometry.computeBoundingSphere();
-        const edgeMaterial = createTopologyEdgeMaterial();
-        edgeOverlay = new THREE.LineSegments(mergedEdgeGeometry, edgeMaterial);
-        edgeOverlay.name = 'STEP_TOPOLOGY_EDGES';
-        edgeOverlay.renderOrder = 1;
-      }
-    }
-    return { modelRoot: model, edgeOverlay };
-  } catch (error) {
-    mergedGeometry?.dispose();
-    mergedEdgeGeometry?.dispose();
-    edgeOverlay?.material.dispose();
-    throw error;
-  } finally {
-    surfaceGeometries.forEach((geometry) => geometry.dispose());
-    edgeGeometries.forEach((geometry) => geometry.dispose());
-    disposeObject(root);
-  }
-}
-
-/** 把已准备的交互 LOD 接入场景，并首次适配相机。 */
-function attachInteractionPreview(preparedPreview, manifest) {
-  state.scene.interactionRoot = preparedPreview.modelRoot;
-  state.interactionManifest = manifest;
-  state.previewManifest = manifest;
-  state.scene.scene.add(preparedPreview.modelRoot);
-  applyCurrentModelPreviewSettings(getCurrentPreviewSettings());
-  applyModelMaterialState(preparedPreview.modelRoot);
-  applyPreviewTransition({ type: 'interaction-ready' });
-  renderModelStats(manifest);
-  fitModelView();
-  setLoading(false);
-  setPreviewStatus('快速预览就绪，高清生成中', 'busy');
-  document.getElementById('fit-model-view').disabled = false;
+  document.getElementById('stat-bounds').textContent = size.map((value) => formatParameterNumber(value)).join(' × ');
 }
 
 /** 将命中的完整预览缓存接回场景，避免重新请求 GLB、清单和面映射。 */
@@ -1272,6 +1026,7 @@ function attachCachedPreview(preview, source = 'memory') {
     .filter(Boolean)
     .forEach((object) => sceneState.scene.add(object));
   applyCurrentModelPreviewSettings(getCurrentPreviewSettings());
+  applyModelMaterialState();
   if (sceneState.interactionRoot) applyPreviewTransition({ type: 'interaction-ready' });
   if (sceneState.detailRoot) applyPreviewTransition({ type: 'detail-ready' });
   const manifest = state.previewManifest || state.interactionManifest;
@@ -1285,79 +1040,122 @@ function attachCachedPreview(preview, source = 'memory') {
     document.getElementById('preview-format').textContent = 'STEP → GLB · 高清';
     setPreviewStatus(`高清预览已从${cacheLabel}恢复`, 'ready');
   } else {
-    setPreviewStatus(`快速预览已从${cacheLabel}恢复，高清生成中`, 'busy');
+    setPreviewStatus(`简易预览已从${cacheLabel}恢复`, 'ready');
   }
+  notifyModelSettingsSelection();
   requestSceneRender();
 }
 
-/** 后台加载细节 LOD 和外壳面映射，完成后在空闲状态无跳动切换。 */
-async function loadDetailPreview(model, controller, token, hasInteractionPreview) {
-  try {
-    const manifest = await getPreviewManifest(model.id, controller.signal);
-    if (token !== state.loadToken || controller.signal.aborted) return false;
-    const [modelResult, mappingResult] = await Promise.allSettled([
-      loadGlb(await resolveApiUrl(manifest.browser_asset.url), controller.signal),
-      getFaceMapping(manifest.face_mapping.url, controller.signal),
-    ]);
-    if (modelResult.status === 'rejected' || mappingResult.status === 'rejected') {
-      if (modelResult.status === 'fulfilled') disposeObject(modelResult.value);
-      throw modelResult.status === 'rejected' ? modelResult.reason : mappingResult.reason;
+/** 合并队列完成的资源；只把当前选择接入场景，其余模型交给有限内存缓存。 */
+function acceptBackgroundPreview(model, quality, { preview, complete }) {
+  const visible = Boolean(activePageLifecycle && state.scene && state.selectedModel?.id === model.id);
+  if (visible && state.scene.modelRoot) {
+    saveModelView();
+    state.pendingViewSnapshot = readModelView();
+  }
+  const previous = visible ? detachCurrentPreview({ preserveOverlays: true }) : takeCachedPreview(model.id);
+  const merged = { ...previous, ...preview };
+  if (previous?.detailRoot && !preview.detailRoot) {
+    merged.previewManifest = previous.previewManifest;
+    merged.mappingEntries = previous.mappingEntries;
+  }
+  for (const key of ['interactionRoot', 'detailRoot', 'edgeOverlay']) {
+    if (previous?.[key] && preview[key] && previous[key] !== preview[key]) {
+      state.scene?.settingsTools?.releasePreview(previous[key]);
+      disposeObject(previous[key]);
     }
-    const modelRoot = modelResult.value;
-    const mapping = mappingResult.value;
-    if (token !== state.loadToken || controller.signal.aborted) {
-      disposeObject(modelRoot);
-      return false;
+  }
+  state.models = state.models.map((item) => item.id === model.id ? { ...item, derivatives: {
+    ...item.derivatives,
+    ...(preview.interactionRoot ? { interaction_state: 'ready' } : {}),
+    ...(preview.detailRoot ? { state: 'ready' } : {}),
+  } } : item);
+  // 序列化在首次 await 前完成；缓存后续淘汰不会使正在保存的字节失效。
+  if (!complete) void previewResources.persistPreview(model.id, merged);
+  if (visible) attachCachedPreview(merged);
+  else cachePreview(model.id, merged);
+}
+
+/** 根据实际解码结果与后端产物分别显示读取、生成和失败状态，已有高清不能被标成等待生成。 */
+function previewQueueLabel(model) {
+  const entry = previewQueue.get(model.id);
+  if (!entry) return null;
+  if (entry.restoring) return { text: entry.restoringQuality === 'detail' ? '高清预览读取中' : '简易预览读取中', kind: 'processing' };
+  if (entry.detail === 'ready') return { text: '高清预览就绪', kind: 'ready' };
+  if (entry.detail === 'failed') return { text: entry.interaction === 'ready' ? '简易可用 · 高清失败' : '预览加载失败', kind: 'failed', error: entry.errors.detail };
+  if (entry.available.detail) return { text: '高清已生成 · 待读取', kind: 'ready' };
+  if (entry.interaction === 'loading') return { text: '简易预览生成中', kind: 'processing' };
+  if (entry.detail === 'loading') return { text: '高清预览生成中', kind: 'processing' };
+  if (entry.interaction === 'ready') return { text: '简易就绪 · 高清排队', kind: 'ready' };
+  if (entry.interaction === 'failed') return { text: '简易失败 · 高清排队', kind: 'failed', error: entry.errors.interaction };
+  if (entry.available.interaction) return { text: '简易已生成 · 待读取', kind: 'ready' };
+  return { text: '简易预览排队中', kind: 'pending' };
+}
+
+/** 刷新可见页面的队列状态；页面卸载时完全不访问场景或页面节点。 */
+function renderPreviewQueueState() {
+  if (!activePageLifecycle || !state.scene) return;
+  if (state.pageMode === 'settings') {
+    const models = getSettingsPreviewModels();
+    if (!models.some((model) => model.id === state.selectedModel?.id)) {
+      const cachedView = readModelView();
+      const model = resolveCurrentPageModel(cachedView);
+      if (model) {
+        state.pendingViewSnapshot = cachedView?.modelId === model.id ? cachedView : null;
+        void selectModel(model);
+        return;
+      }
+      if (state.selectedModel) { state.selectedModel = null; clearPreview(); }
     }
-    const preparedPreview = prepareLoadedModel(modelRoot);
-    const triangleCount = preparedPreview.modelRoot.geometry.getIndex().count / 3;
-    try {
-      state.mappingEntries = prepareMappingEntries(mapping.entries, triangleCount);
-    } catch (error) {
-      disposeObject(preparedPreview.modelRoot);
-      if (preparedPreview.edgeOverlay) disposeObject(preparedPreview.edgeOverlay);
-      throw error;
-    }
-    state.scene.detailRoot = preparedPreview.modelRoot;
-    state.scene.edgeOverlay = preparedPreview.edgeOverlay;
-    state.previewManifest = manifest;
-    preparedPreview.modelRoot.visible = false;
-    state.scene.scene.add(preparedPreview.modelRoot);
-    if (preparedPreview.edgeOverlay) state.scene.scene.add(preparedPreview.edgeOverlay);
-    applyCurrentModelPreviewSettings(getCurrentPreviewSettings());
-    applyModelMaterialState(preparedPreview.modelRoot);
-    renderModelStats(manifest);
-    setTopologyEdgeControlAvailable(Boolean(preparedPreview.edgeOverlay));
-    applyPreviewTransition({ type: 'detail-ready' });
+    renderModelSettingsModelSelect();
+  }
+  document.querySelectorAll('.model-row').forEach((row) => {
+    const label = previewQueueLabel({ id: row.dataset.modelId });
+    const status = row.querySelector('.artifact-state');
+    if (!label || !status) return;
+    status.textContent = label.text;
+    status.className = `artifact-state ${label.kind}`;
+    status.title = label.error || label.text;
+  });
+  const model = state.selectedModel;
+  if (!model) return;
+  const entry = previewQueue.get(model.id);
+  if (!entry) return;
+  if (state.scene.detailRoot) {
     setLoading(false);
-    document.getElementById('preview-format').textContent = 'STEP → GLB · 高清';
     setPreviewStatus('高清预览与映射就绪', 'ready');
-    void persistPreview(model.id);
-    await refreshModels({ quiet: true });
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError' || token !== state.loadToken) return false;
-    applyPreviewTransition({ type: 'detail-failed' });
-    if (!hasInteractionPreview) throw error;
+  } else if (state.scene.interactionRoot) {
     setLoading(false);
-    setPreviewStatus('快速预览可用', 'ready');
-    showToast(`高清预览生成失败：${error.message}`, true);
-    return false;
+    setPreviewStatus(entry.detail === 'failed' ? '简易预览可用，高清加载失败'
+      : entry.detail === 'loading' ? entry.available.detail ? '简易预览可用，正在读取高清' : '简易预览可用，正在生成高清'
+        : entry.available.detail ? '简易预览可用，高清已生成，等待读取' : '简易预览可用，高清排队中', 'ready');
+  } else {
+    const failed = entry.interaction === 'failed' && entry.detail === 'failed';
+    const label = previewQueueLabel(model);
+    setLoading(!failed, label.text, entry.restoring
+      ? '正在读取已生成的预览资源，无需等待后台高清任务'
+      : '已有预览独立读取；新预览先生成简易再生成高清，切换页面不会中断任务');
+    setPreviewStatus(label.text, failed ? 'error' : 'busy');
+    if (failed) document.getElementById('preview-empty').hidden = false;
   }
 }
 
-/** 选中模型后优先加载交互 LOD，并在后台补充细节 LOD 与面映射。 */
+/** 将已确认列表交给后台队列，已知结果及当前任务保持不变。 */
+function syncPreviewQueue(options) {
+  previewQueue.sync(state.models, options);
+}
+
+/** 切换展示对象并请求后续优先准备；不取消旧模型的后台生成、下载或解析。 */
 async function selectModel(model, force = false) {
+  if (state.pageMode === 'settings' && !getSettingsPreviewModels().some((item) => item.id === model.id)) return;
   if (!force && state.selectedModel?.id === model.id && state.scene?.modelRoot) return;
   if (state.pendingViewSnapshot?.modelId !== model.id) state.pendingViewSnapshot = null;
-  state.loadController?.abort();
   window.clearTimeout(state.idleTimer);
   state.idleTimer = null;
   state.lastRenderAt = 0;
-  const token = state.loadToken + 1;
-  state.loadToken = token;
-  const cachedPreview = takeCachedPreview(model.id);
+  state.loadToken += 1;
   saveModelView();
+  const cachedPreview = takeCachedPreview(model.id);
   cacheCurrentPreview();
   applyPreviewTransition({ type: 'select-model', modelId: model.id });
   state.selectedModel = model;
@@ -1368,81 +1166,26 @@ async function selectModel(model, force = false) {
   renderModelList();
   document.getElementById('preview-empty').hidden = true;
   document.getElementById('preview-title').textContent = model.filename;
-  document.getElementById('preview-format').textContent = 'STEP → GLB · 快速';
+  document.getElementById('preview-format').textContent = 'STEP → GLB · 简易';
   document.getElementById('fit-model-view').disabled = true;
   setTopologyEdgeControlAvailable(false);
-  if (cachedPreview) {
-    attachCachedPreview(cachedPreview);
-    if (cachedPreview.detailRoot) {
-      state.loadController = null;
-      return;
-    }
-    const controller = new AbortController();
-    state.loadController = controller;
-    void loadDetailPreview(model, controller, token, true).finally(() => {
-      if (state.loadController === controller) state.loadController = null;
-    });
-    return;
-  }
-  const controller = new AbortController();
-  state.loadController = controller;
-  try {
-    setLoading(true, '正在恢复预览缓存', '读取已合并网格与 STEP 面映射');
-    setPreviewStatus('正在恢复预览缓存', 'busy');
-    const persistedPreview = await loadPersistedPreview(model.id, controller.signal);
-    if (token !== state.loadToken || controller.signal.aborted) {
-      if (persistedPreview) disposePreview(persistedPreview);
-      return;
-    }
-    if (persistedPreview) {
-      attachCachedPreview(persistedPreview, 'persistent');
-      state.loadController = null;
-      return;
-    }
-    setLoading(true, '正在生成快速预览', '提取外壳并生成交互网格');
-    setPreviewStatus('正在准备快速预览', 'busy');
-    const manifest = await getInteractionPreviewManifest(model.id, controller.signal);
-    if (token !== state.loadToken || controller.signal.aborted) return;
-    const modelRoot = await loadGlb(await resolveApiUrl(manifest.browser_asset.url), controller.signal);
-    if (token !== state.loadToken || controller.signal.aborted) {
-      disposeObject(modelRoot);
-      return;
-    }
-    attachInteractionPreview(prepareLoadedModel(modelRoot), manifest);
-    void loadDetailPreview(model, controller, token, true).finally(() => {
-      if (state.loadController === controller) state.loadController = null;
-    });
-  } catch (interactionError) {
-    if (interactionError.name === 'AbortError' || token !== state.loadToken) return;
-    applyPreviewTransition({ type: 'interaction-failed' });
-    setLoading(true, '快速预览不可用', '正在回退到细节预览');
-    setPreviewStatus('正在加载细节预览', 'busy');
-    try {
-      const loaded = await loadDetailPreview(model, controller, token, false);
-      if (loaded) {
-        fitModelView();
-        document.getElementById('fit-model-view').disabled = false;
-      }
-    } catch (detailError) {
-      if (detailError.name === 'AbortError' || token !== state.loadToken) return;
-      setLoading(false);
-      document.getElementById('preview-empty').hidden = false;
-      document.getElementById('fit-model-view').disabled = true;
-      setTopologyEdgeControlAvailable(false);
-      setPreviewStatus('模型处理失败', 'error');
-      showToast(detailError.message, true);
-    } finally {
-      if (state.loadController === controller) state.loadController = null;
-    }
-  }
+  if (cachedPreview) attachCachedPreview(cachedPreview);
+  syncPreviewQueue();
+  previewQueue.request(model.id, { reload: !cachedPreview, retry: true });
+  renderPreviewQueueState();
 }
 
-/** 从后端刷新模型库，保留当前仍存在的选择和预览。 */
+/** 从后端刷新模型库并返回是否成功；过期请求及已卸载页面不能覆盖删除后的列表。 */
 async function refreshModels(options = {}) {
   const button = document.getElementById('refresh-models');
+  const token = ++state.modelsRefreshToken;
+  const lifecycle = activePageLifecycle;
   if (!options.quiet) button?.classList.add('spinning');
   try {
-    state.models = await listModels();
+    const models = await listModels();
+    if (token !== state.modelsRefreshToken || lifecycle?.signal.aborted) return false;
+    state.models = models;
+    state.modelsLoaded = true;
     state.selectedIds = new Set([...state.selectedIds].filter((id) => state.models.some((model) => model.id === id)));
     const validModelIds = new Set(state.models.map((model) => model.id));
     evictCachedPreviews([...state.previewCache.keys()].filter((id) => !validModelIds.has(id)));
@@ -1458,83 +1201,19 @@ async function refreshModels(options = {}) {
       else { state.selectedModel = null; clearModelView(); clearPreview(); }
     }
     renderModelList();
+    syncPreviewQueue({ retryFailed: !options.quiet });
+    renderPreviewQueueState();
     setConnection('模型服务已连接');
+    return true;
   } catch (error) {
-    setConnection('模型服务未连接', true);
+    if (token !== state.modelsRefreshToken || lifecycle?.signal.aborted) return false;
+    console.warn('模型列表刷新失败，保留已有列表：', error);
+    setConnection(state.modelsLoaded ? '列表刷新失败，已保留现有模型' : '模型服务未连接', true);
     if (!options.quiet) showToast(error.message, true);
-  } finally { button?.classList.remove('spinning'); }
-}
-
-/** 创建单个上传队列项并返回可更新的状态节点。 */
-function createUploadItem(file) {
-  const item = document.createElement('div');
-  item.className = 'upload-item';
-  const name = document.createElement('strong');
-  name.textContent = file.name;
-  const status = document.createElement('span');
-  status.textContent = '等待上传';
-  const track = document.createElement('div');
-  track.className = 'progress-track';
-  const bar = document.createElement('b');
-  track.append(bar);
-  item.append(name, status, track);
-  document.getElementById('upload-queue').append(item);
-  return { bar, status };
-}
-
-/** 校验并并行上传用户选择的 STEP/STP 文件。 */
-async function uploadFiles(files) {
-  const validFiles = [];
-  const invalidFiles = [];
-  files.forEach((file) => {
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    if (VALID_EXTENSIONS.has(extension)) validFiles.push(file); else invalidFiles.push(file);
-  });
-  if (invalidFiles.length) showToast(`已拒绝 ${invalidFiles.length} 个文件：仅允许 .stp 或 .step`, true);
-  if (!validFiles.length) return;
-  const results = await Promise.all(validFiles.map(async (file) => {
-    const queueItem = createUploadItem(file);
-    try {
-      const model = await uploadModel(file, (progress) => {
-        queueItem.bar.style.width = `${progress}%`;
-        queueItem.status.textContent = `上传中 ${progress}%`;
-      });
-      queueItem.status.className = 'success';
-      queueItem.status.textContent = '源文件已保存';
-      return model;
-    } catch (error) {
-      queueItem.status.className = 'error';
-      queueItem.status.textContent = '上传失败';
-      queueItem.status.title = error.message;
-      return null;
-    }
-  }));
-  const uploaded = results.filter(Boolean);
-  await refreshModels({ quiet: true });
-  if (uploaded.length) {
-    const latest = state.models.find((model) => model.id === uploaded[uploaded.length - 1].id);
-    if (latest) await selectModel(latest, true);
-    showToast(`${uploaded.length} 个 STEP 模型已保存，正在生成浏览网格`);
+    return false;
+  } finally {
+    if (token === state.modelsRefreshToken) button?.classList.remove('spinning');
   }
-}
-
-/** 删除指定模型集合，并在必要时清空当前预览。 */
-async function removeModels(modelIds) {
-  if (!modelIds.length) return;
-  if (!window.confirm(`确定删除选中的 ${modelIds.length} 个模型及其派生产物吗？`)) return;
-  try {
-    const removesCurrent = Boolean(state.selectedModel && modelIds.includes(state.selectedModel.id));
-    if (modelIds.length === 1) await deleteModel(modelIds[0]); else await deleteModels(modelIds);
-    evictCachedPreviews(modelIds);
-    Object.keys(state.pageSelections).forEach((pageMode) => {
-      if (!state.pageSelections[pageMode] || !modelIds.includes(state.pageSelections[pageMode])) return;
-      clearModelView(pageMode);
-    });
-    state.selectedIds.clear();
-    if (removesCurrent) { state.selectedModel = null; clearModelView(); clearPreview(); }
-    await refreshModels({ quiet: true });
-    showToast(`已删除 ${modelIds.length} 个模型`);
-  } catch (error) { showToast(error.message, true); }
 }
 
 /** 切换已合并的 STEP 拓扑边线覆盖层，不显示三角剖分边。 */
@@ -1561,7 +1240,7 @@ function bindEvents(lifecycleSignal) {
     dropzone.addEventListener('drop', async (event) => uploadFiles(Array.from(event.dataTransfer?.files || [])), { signal: lifecycleSignal });
     document.getElementById('model-search').addEventListener('input', (event) => { state.search = event.target.value; renderModelList(); }, { signal: lifecycleSignal });
     document.getElementById('refresh-models').addEventListener('click', () => refreshModels(), { signal: lifecycleSignal });
-    document.getElementById('delete-selected').addEventListener('click', () => removeModels([...state.selectedIds]), { signal: lifecycleSignal });
+    document.getElementById('delete-selected').addEventListener('click', () => requestModelDeletion([...state.selectedIds]), { signal: lifecycleSignal });
     document.getElementById('select-all-models').addEventListener('change', (event) => {
       state.selectedIds = event.target.checked ? new Set(state.models.map((model) => model.id)) : new Set();
       renderModelList();
@@ -1579,42 +1258,7 @@ function bindEvents(lifecycleSignal) {
       await selectModel(model);
     }, { signal: lifecycleSignal });
   }
-  const modelSettingsSelector = document.getElementById('model-settings-model-select');
-  if (modelSettingsSelector) {
-    const modelSettingsOptions = document.getElementById('model-settings-model-options');
-    modelSettingsSelector.addEventListener('click', () => {
-      const shouldOpen = modelSettingsSelector.getAttribute('aria-expanded') !== 'true';
-      setModelSettingsModelSelectOpen(shouldOpen, shouldOpen ? 'option' : 'trigger');
-    }, { signal: lifecycleSignal });
-    modelSettingsSelector.addEventListener('keydown', (event) => {
-      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
-      event.preventDefault();
-      setModelSettingsModelSelectOpen(true, 'option');
-    }, { signal: lifecycleSignal });
-    modelSettingsOptions?.addEventListener('click', async (event) => {
-      const option = event.target.closest('[role="option"]');
-      const model = state.models.find((item) => item.id === option?.dataset.modelId);
-      if (!model) return;
-      setModelSettingsModelSelectOpen(false, 'trigger');
-      await selectModel(model);
-    }, { signal: lifecycleSignal });
-    modelSettingsOptions?.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setModelSettingsModelSelectOpen(false, 'trigger');
-      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        moveModelSettingsOptionFocus(modelSettingsOptions, event.key === 'ArrowDown' ? 1 : -1);
-      } else if (event.key === 'Home' || event.key === 'End') {
-        event.preventDefault();
-        const items = modelSettingsOptions.querySelectorAll('[role="option"]');
-        items[event.key === 'Home' ? 0 : items.length - 1]?.focus();
-      } else if (event.key === 'Tab') setModelSettingsModelSelectOpen(false);
-    }, { signal: lifecycleSignal });
-    document.addEventListener('pointerdown', (event) => {
-      if (!event.target.closest('.model-settings-select-control')) setModelSettingsModelSelectOpen(false);
-    }, { signal: lifecycleSignal });
-  }
+  modelSearchSelect.bind(lifecycleSignal);
   document.getElementById('fit-model-view').addEventListener('click', fitModelView, { signal: lifecycleSignal });
   document.getElementById('toggle-topology-edges').addEventListener('click', toggleTopologyEdges, { signal: lifecycleSignal });
   window.addEventListener('sat-layout-theme-change', () => {
@@ -1625,12 +1269,17 @@ function bindEvents(lifecycleSignal) {
   window.addEventListener('beforeunload', disposeModelUploadPage, { signal: lifecycleSignal });
 }
 
-/** 初始化图标、三维场景、交互事件和模型库连接。 */
+/** 初始化页面场景并先恢复会话预览；后台校验模型列表不阻塞已有数据展示。 */
 async function initialize(lifecycleSignal) {
   const cachedView = readModelView();
   window.lucide?.createIcons();
   try {
-    state.qualityConfig = normalizePreviewQualityConfig(await getPreviewQualityConfig());
+    const [quality, cache, modelSearch] = await Promise.all([
+      getPreviewQualityConfig(), getPreviewCacheConfig(), getModelSearchConfig(),
+    ]);
+    state.qualityConfig = normalizePreviewQualityConfig(quality);
+    state.previewCacheConfig = cache;
+    modelSearchSelect.configure(modelSearch);
   } catch (error) {
     if (lifecycleSignal.aborted) return;
     showToast(`预览质量配置读取失败，已使用默认值：${error.message}`, true);
@@ -1640,12 +1289,18 @@ async function initialize(lifecycleSignal) {
   initializeScene(lifecycleSignal);
   bindEvents(lifecycleSignal);
   clearPreview();
+  const sessionModel = state.modelsLoaded ? resolveCurrentPageModel(cachedView) : null;
+  if (sessionModel) {
+    state.pendingViewSnapshot = cachedView?.modelId === sessionModel.id ? cachedView : null;
+    void selectModel(sessionModel, true);
+  }
+  const selectionToken = state.loadToken;
   try {
-    await checkHealth();
+    if (!state.modelsLoaded) await checkHealth();
     if (lifecycleSignal.aborted) return;
-    await refreshModels({ quiet: true });
-    if (lifecycleSignal.aborted) return;
-    const initialModel = resolveCurrentPageModel(cachedView);
+    const refreshed = await refreshModels({ quiet: true });
+    if (lifecycleSignal.aborted || !refreshed) return;
+    const initialModel = !sessionModel && state.loadToken === selectionToken ? resolveCurrentPageModel(cachedView) : null;
     const initialView = cachedView?.modelId === initialModel?.id ? cachedView : null;
     if (initialModel) {
       state.pendingViewSnapshot = initialView;
@@ -1710,7 +1365,7 @@ function restoreRetainedPreviewPanel() {
     return;
   }
   setLoading(false);
-  setPreviewStatus(hasDetailPreview ? '高清预览已从内存恢复' : '快速预览已从内存恢复，高清生成中', hasDetailPreview ? 'ready' : 'busy');
+  setPreviewStatus(hasDetailPreview ? '高清预览已从内存恢复' : '简易预览已从内存恢复', 'ready');
 }
 
 /** 在模型预览菜单之间接管既有场景，避免重新请求预览资源或重建 WebGL 上下文。 */
@@ -1746,22 +1401,13 @@ function resumeModelPreviewPage(lifecycleSignal) {
   notifyModelSettingsSelection();
   restoreRetainedPreviewPanel();
   fitModelView();
-  if (state.scene.interactionRoot && !state.scene.detailRoot && !state.loadController) {
-    const token = state.loadToken;
-    const controller = new AbortController();
-    state.loadController = controller;
-    void loadDetailPreview(pageModel, controller, token, true).finally(() => {
-      if (state.loadController === controller) state.loadController = null;
-    });
-  }
+  renderPreviewQueueState();
   return true;
 }
 
-/** 暂停页面专属事件和在途加载，但保留可立即复用的场景、模型和 GPU 缓存。 */
+/** 暂停页面专属事件并缓存当前预览；会话后台队列继续运行，不依赖场景存活。 */
 function suspendModelPreviewPage() {
   saveModelView();
-  state.loadController?.abort();
-  state.loadController = null;
   state.loadToken += 1;
   window.clearTimeout(state.idleTimer);
   window.clearTimeout(state.viewSaveTimer);
@@ -1782,29 +1428,33 @@ function cancelDeferredPreviewDisposal() {
   deferredPreviewDisposeTimer = null;
 }
 
-/** 在没有新预览页面接管时，于当前路由切换结束后完整释放 GPU 资源。 */
+/** 没有新预览页面接管时释放画布及 GPU 上下文，列表与有限网格缓存继续属于应用会话。 */
 function scheduleDeferredPreviewDisposal() {
   cancelDeferredPreviewDisposal();
   deferredPreviewDisposeTimer = window.setTimeout(() => {
     deferredPreviewDisposeTimer = null;
-    if (!activePageLifecycle) disposeModelUploadPage();
+    if (!activePageLifecycle) disposeModelUploadPage({ preserveSession: true });
   }, MODEL_PREVIEW_HANDOFF_DELAY_MS);
 }
 
-/** 释放模型上传页的请求、事件、定时器、Three.js GPU 资源及 WebGL 上下文。 */
-function disposeModelUploadPage() {
+/** 释放页面渲染资源；切页保留列表、选择和已解码网格，窗口卸载时同时清理会话缓存。 */
+function disposeModelUploadPage({ preserveSession = false } = {}) {
   cancelDeferredPreviewDisposal();
   saveModelView();
-  state.loadController?.abort();
   state.loadToken += 1;
   window.clearTimeout(state.idleTimer);
   window.clearTimeout(state.viewSaveTimer);
-  state.previewCache.forEach(disposePreview);
-  state.previewCache.clear();
+  if (!preserveSession) {
+    modelSearchSelect.reset();
+    previewQueue.dispose();
+    state.previewCache.forEach(disposePreview);
+    state.previewCache.clear();
+  }
   const sceneState = state.scene;
   if (sceneState) {
     sceneState.envelopePreview?.dispose();
     sceneState.settingsTools?.dispose();
+    sceneState.coordinateFramePreview?.dispose();
     sceneState.orientationGizmo?.dispose();
     disposeOrbitControls(sceneState.controls);
     disposeObject(sceneState.scene);
@@ -1813,27 +1463,32 @@ function disposeModelUploadPage() {
     sceneState.renderer?.domElement.remove();
   }
   state.scene = null;
-  state.loadController = null;
   state.idleTimer = null;
   state.viewSaveTimer = null;
   state.previewTransition = null;
   state.interactionQuality = null;
   state.isInteracting = false;
   state.lastRenderAt = 0;
-  state.showTopologyEdges = true;
   state.scrollRestoreApplied = false;
-  state.models = [];
-  state.selectedModel = null;
+  state.modelsRefreshToken += 1;
+  state.onRequestDelete = null;
   state.modelSettings = null;
-  state.selectedIds.clear();
+  state.coordinateFrameDraft = null;
   state.mappingEntries = [];
   state.previewManifest = null;
   state.interactionManifest = null;
   state.pendingViewSnapshot = null;
   state.pageMode = 'upload';
-  state.pageSelections = createModelPageSelections();
   state.selectFirstModel = false;
-  state.connection = { message: '连接检查中', error: false };
+  if (!preserveSession) {
+    state.showTopologyEdges = true;
+    state.models = [];
+    state.modelsLoaded = false;
+    state.selectedModel = null;
+    state.selectedIds.clear();
+    state.pageSelections = createModelPageSelections();
+    state.connection = { message: '连接检查中', error: false };
+  }
   if (import.meta.env.DEV) delete window.__satLayoutPreviewTestApi;
 }
 
@@ -1849,6 +1504,8 @@ export function getPreviewInteractionSnapshot() {
     viewOffsetEnabled: Boolean(camera.view?.enabled),
     modelScale: modelRoot?.scale.toArray() || null,
     modelRotation: modelRoot?.rotation.toArray().slice(0, 3) || null,
+    modelMatrix: modelRoot?.matrixWorld.toArray() || null,
+    coordinateDraft: state.scene?.coordinateFramePreview?.getSnapshot() || null,
     gridRotation: grid?.rotation.toArray().slice(0, 3) || null,
     envelope: state.scene?.envelopePreview?.getSnapshot() || null,
   };
@@ -1859,11 +1516,21 @@ function mountModelPreviewPage(options = {}) {
   cancelDeferredPreviewDisposal();
   activePageLifecycle?.abort();
   state.pageMode = options.pageMode || 'upload';
+  state.settingsNotifiedModelId = undefined;
   state.selectFirstModel = Boolean(options.selectFirstModel);
+  state.onRequestDelete = options.onRequestDelete || null;
   const lifecycle = new AbortController();
   activePageLifecycle = lifecycle;
-  if (state.scene) resumeModelPreviewPage(lifecycle.signal);
-  else void initialize(lifecycle.signal);
+  if (state.modelsLoaded) {
+    const searchInput = document.getElementById('model-search');
+    if (searchInput) searchInput.value = state.search;
+    renderModelList();
+    setConnection(state.connection.message, state.connection.error);
+  }
+  if (state.scene) {
+    resumeModelPreviewPage(lifecycle.signal);
+    void refreshModels({ quiet: true });
+  } else void initialize(lifecycle.signal);
   return () => {
     if (activePageLifecycle !== lifecycle) return;
     lifecycle.abort();
@@ -1874,11 +1541,11 @@ function mountModelPreviewPage(options = {}) {
 }
 
 /** 将模型上传控制器挂载到 React 已渲染的 DOM，并返回卸载函数。 */
-export function mountModelUploadPage() {
-  return mountModelPreviewPage({ pageMode: 'upload' });
+export function mountModelUploadPage(options = {}) {
+  return mountModelPreviewPage({ ...options, pageMode: 'upload' });
 }
 
-/** 将只读模型预览挂载到模型设置页，并在没有历史选择时展示首个模型。 */
+/** 挂载模型设置页，仅在简易或高清预览加载成功后自动选择首个可设置模型。 */
 export function mountModelSettingsPage() {
   return mountModelPreviewPage({ pageMode: 'settings', selectFirstModel: true });
 }

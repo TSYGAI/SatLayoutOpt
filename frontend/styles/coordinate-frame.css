@@ -1,0 +1,294 @@
+/** 文件说明：坐标系编辑区域样式，复用模型设置页的输入控件和主题色，不改变坐标系交互逻辑。 */
+
+.coordinate-frame-section {
+  gap: 11px;
+  padding-top: 20px;
+}
+
+.coordinate-hint {
+  margin: 0;
+  color: #8da2b6;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.coordinate-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  color: #8da2b6;
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: nowrap;
+}
+
+.coordinate-vector {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.coordinate-vector legend {
+  margin: 0 0 7px;
+  padding: 0;
+  color: #8da2b6;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.coordinate-mode {
+  display: grid;
+  gap: 7px;
+  color: #8da2b6;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.coordinate-mode > span {
+  line-height: 1.3;
+}
+
+.coordinate-mode .model-settings-field-select-control {
+  position: relative;
+  display: block;
+}
+
+.coordinate-mode .model-settings-field-select-trigger {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  width: 100%;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 7px;
+  color: #dbe8f1;
+  background: #101b26;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.coordinate-mode .model-settings-field-select-trigger:hover:not(:disabled),
+.coordinate-mode .model-settings-field-select-trigger:focus-visible,
+.coordinate-mode .model-settings-field-select-control.open .model-settings-field-select-trigger {
+  border-color: rgba(57, 208, 233, 0.55);
+  outline: none;
+}
+
+.coordinate-mode .model-settings-field-select-options {
+  max-height: 190px;
+  border-radius: 5px;
+  background: #101b26;
+}
+
+.coordinate-mode .model-settings-field-select-option {
+  min-height: 34px;
+}
+
+.coordinate-mode .model-settings-field-select-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #707070;
+}
+
+.coordinate-actions {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 1.15fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.coordinate-frame-section button {
+  display: inline-flex;
+  min-width: 0;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid rgba(57, 208, 233, 0.34);
+  border-radius: 5px;
+  color: #cfeef2;
+  background: #102531;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.coordinate-frame-section > button {
+  justify-self: stretch;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+}
+
+.coordinate-frame-section button:hover:not(:disabled),
+.coordinate-frame-section button:focus-visible {
+  border-color: #39d0e9;
+  color: #ffffff;
+  background: #153442;
+  outline: none;
+}
+
+.coordinate-frame-section #confirm-coordinate-frame {
+  border-color: #087fa5;
+  color: #ffffff;
+  background: #087fa5;
+}
+
+.coordinate-frame-section #confirm-coordinate-frame:hover:not(:disabled),
+.coordinate-frame-section #confirm-coordinate-frame:focus-visible {
+  border-color: #39d0e9;
+  background: #0a91ad;
+}
+
+.coordinate-frame-section #cancel-coordinate-frame {
+  color: #8da2b6;
+  background: transparent;
+}
+
+.coordinate-frame-section #reset-coordinate-frame {
+  border-color: rgba(132, 159, 184, 0.28);
+  color: #a9bac8;
+  background: rgba(132, 159, 184, 0.08);
+}
+
+.coordinate-frame-section button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.coordinate-error {
+  margin: 0;
+  color: #ff8b9b;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.model-settings-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.model-settings-fields:disabled {
+  opacity: 0.6;
+}
+
+/* 提高结构规则优先级，避免共享样式后加载时将坐标系误判为末节并隐藏分隔线。 */
+.model-settings-form > .model-settings-fields:not(:last-child) > .model-settings-form-section:last-of-type,
+.model-settings-form > .model-settings-form-section.coordinate-frame-section {
+  border-bottom-width: 1px;
+}
+
+.coordinate-frame-section + .model-settings-fields > .model-settings-form-section:first-child {
+  padding-top: 20px;
+}
+
+:root[data-theme="light"] .coordinate-hint,
+:root[data-theme="light"] .coordinate-summary,
+:root[data-theme="light"] .coordinate-vector legend,
+:root[data-theme="light"] .coordinate-mode {
+  color: #587184;
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-trigger {
+  border-color: rgba(8, 127, 165, 0.55);
+  border-radius: 7px;
+  color: #263f54;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-options {
+  border-color: rgba(80, 109, 132, 0.28);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(36, 59, 78, 0.16);
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-trigger:hover:not(:disabled),
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-trigger:focus-visible,
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-control.open .model-settings-field-select-trigger {
+  border-color: rgba(8, 127, 165, 0.55);
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-trigger > svg {
+  color: #587184;
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-option {
+  color: #263f54;
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-option:hover,
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-option:focus-visible {
+  color: #087fa5;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .coordinate-mode .model-settings-field-select-option[aria-selected="true"] {
+  color: #ffffff;
+  background: #808080;
+}
+
+:root[data-theme="light"] .coordinate-frame-section button {
+  border-color: rgba(8, 127, 165, 0.32);
+  color: #285d70;
+  background: #eaf5f8;
+}
+
+:root[data-theme="light"] .coordinate-frame-section button:hover:not(:disabled),
+:root[data-theme="light"] .coordinate-frame-section button:focus-visible {
+  border-color: #087fa5;
+  color: #075f7c;
+  background: #dceff4;
+}
+
+:root[data-theme="light"] .coordinate-frame-section #confirm-coordinate-frame {
+  border-color: #086b83;
+  color: #ffffff;
+  background: #0b7892;
+}
+
+:root[data-theme="light"] .coordinate-frame-section #confirm-coordinate-frame:hover:not(:disabled),
+:root[data-theme="light"] .coordinate-frame-section #confirm-coordinate-frame:focus-visible {
+  border-color: #066d85;
+  color: #ffffff;
+  background: #066d85;
+}
+
+:root[data-theme="light"] .coordinate-frame-section #cancel-coordinate-frame {
+  border-color: rgba(80, 109, 132, 0.22);
+  color: #587184;
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .coordinate-frame-section #reset-coordinate-frame {
+  border-color: rgba(80, 109, 132, 0.24);
+  color: #587184;
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .coordinate-error {
+  color: #b32b42;
+}
+
+@media (max-width: 420px) {
+  .coordinate-mode {
+    gap: 6px;
+  }
+
+  .coordinate-actions {
+    gap: 6px;
+  }
+
+  .coordinate-frame-section button {
+    padding: 0 6px;
+    font-size: 10px;
+  }
+}

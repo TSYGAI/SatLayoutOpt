@@ -1,15 +1,15 @@
 /**
  * 文件说明：共享三维模型预览面板，统一模型上传页与模型设置页的画布、状态和统计 DOM 契约。
- * Three.js 场景由控制器挂载，本组件提供稳定 DOM 和页面专属工具栏插槽。
+ * Three.js 场景由控制器异步挂载，本组件提供局部启动状态、失败重试和稳定 DOM。
  */
 
-import { Box, GitBranch, Maximize } from 'lucide-react';
+import { Box, GitBranch, Maximize } from './icons.js';
 
 /**
  * 渲染可被模型预览控制器挂载的共享面板。
- * @param {{ emptyDetail?: string, extraActions?: import('react').ReactNode }} props 空状态说明及可选工具栏内容。
+ * @param {{ emptyDetail?: string, extraActions?: import('react').ReactNode, startup?: object, onRetry?: Function }} props 空状态、工具栏及局部启动状态。
  */
-export function ModelPreviewPanel({ emptyDetail = '从左侧模型库选择 STEP 模型', extraActions = null }) {
+export function ModelPreviewPanel({ emptyDetail = '从左侧模型库选择 STP 或 STEP 模型', extraActions = null, startup, onRetry }) {
   return (
     <section className="model-preview-panel" aria-labelledby="preview-title">
       <header className="preview-header">
@@ -38,6 +38,14 @@ export function ModelPreviewPanel({ emptyDetail = '从左侧模型库选择 STEP
           <strong>正在生成浏览网格</strong>
           <small>STEP 面正在离散为 GLB 并建立映射</small>
         </div>
+        {startup && startup.status !== 'ready' && (
+          <div className="model-loading preview-startup" role={startup.status === 'error' ? 'alert' : 'status'}>
+            {startup.status === 'loading' && <span className="loading-spinner" />}
+            <strong>{startup.status === 'error' ? '三维预览加载失败' : '正在加载三维预览'}</strong>
+            <small>{startup.status === 'error' ? startup.message : '页面已打开，预览将自动显示'}</small>
+            {startup.status === 'error' && <button type="button" onClick={onRetry}>重试预览</button>}
+          </div>
+        )}
         <div className="viewport-badge viewport-badge-right"><span className="axis-dot x" />X <span className="axis-dot y" />Y <span className="axis-dot z" />Z</div>
       </div>
 
@@ -45,7 +53,7 @@ export function ModelPreviewPanel({ emptyDetail = '从左侧模型库选择 STEP
         <div className="model-stats" aria-live="polite">
           <div><small>实体</small><strong id="stat-bodies">--</strong></div>
           <div><small>STEP 面</small><strong id="stat-faces">--</strong></div>
-          <div><small>三角形</small><strong id="stat-triangles">--</strong></div>
+          <div><small>三角面</small><strong id="stat-triangles">--</strong></div>
           <div><small>包围尺寸</small><strong id="stat-bounds">--</strong></div>
         </div>
       </div>

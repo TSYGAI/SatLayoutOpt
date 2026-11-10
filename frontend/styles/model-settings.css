@@ -1,4 +1,4 @@
-/* 文件说明：模型设置页补充样式，定义包络增量、安装面、包络生成与预览开关；整体分栏复用模型上传页。 */
+/** 文件说明：模型设置页补充样式，定义数字输入居中、包络增量、安装面、包络生成与预览开关；整体分栏复用模型上传页。 */
 
 .model-settings-clearance-hint {
   margin: 0;
@@ -264,7 +264,7 @@
 }
 
 .model-settings-form-section:last-of-type {
-  border-bottom: 0;
+  border-bottom-width: 0;
 }
 
 .model-settings-section-heading h2 {
@@ -422,6 +422,11 @@
   background: #101b26;
   font: inherit;
   text-align: center;
+}
+
+/* 与前置配置一致，为原生微调箭头预留的右侧宽度补齐左内边距，使数值相对整个输入框居中。 */
+.model-settings-page-shell .model-settings-field input[type="number"] {
+  padding-left: 26px;
 }
 
 .model-settings-field input::placeholder {
@@ -767,7 +772,8 @@
   white-space: nowrap;
 }
 
-.model-viewport canvas.installation-picking {
+.model-viewport canvas.installation-picking,
+.model-viewport .installation-picking canvas {
   cursor: crosshair;
 }
 

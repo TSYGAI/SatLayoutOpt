@@ -4,6 +4,7 @@
  */
 
 import { SAFETY_CLEARANCE_FIELDS } from './model-safety-clearance-state.js';
+import { ParameterNumberInput } from '../../components/ParameterNumberInput.jsx';
 
 /**
  * 渲染前后、左右、上下三组毫米距离；每次失焦请求保存完整模型设置。
@@ -19,9 +20,8 @@ export function ModelSafetyClearanceSection({ values, disabled, onChange, onBlur
         {SAFETY_CLEARANCE_FIELDS.map(({ key, label, axis }) => (
           <label key={key} className="model-settings-field" htmlFor={`safety-clearance-${key}`}>
             <span>{label} <small>{axis}</small></span>
-            <input
+            <ParameterNumberInput
               id={`safety-clearance-${key}`}
-              type="number"
               min="0"
               step="any"
               required

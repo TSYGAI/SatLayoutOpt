@@ -1,0 +1,40 @@
+/** 文件说明：定义卫星设置三列操作按钮、左侧包络与右对齐存储状态及逐模型存储结果，适配窄栏和深浅主题。 */
+.model-settings-envelope-actions .model-settings-scope-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 3px;
+  isolation: isolate;
+}
+.model-settings-scope-switch::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 3px auto 3px 3px;
+  width: calc(50% - 3px);
+  border-radius: 3px;
+  background: #205061;
+}
+.model-settings-scope-switch[aria-checked="true"]::before { left: 50%; }
+.model-settings-scope-switch > span { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 3px; color: #8da2b6; }
+.model-settings-scope-switch[aria-checked="false"] [data-scope-value="single"],
+.model-settings-scope-switch[aria-checked="true"] [data-scope-value="all"] { color: #cfeef2; }
+.model-settings-envelope-actions .model-settings-scope-switch svg { width: 10px; height: 10px; }
+.model-settings-envelope-actions .model-settings-scope-switch:focus-visible { outline: 2px solid #39d0e9; outline-offset: 2px; }
+.model-settings-action-statuses { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.model-settings-action-statuses > .model-settings-envelope-status,
+.model-settings-action-statuses > .model-settings-store-status { margin: 0; }
+.model-settings-action-statuses > .model-settings-store-status { margin-inline-start: auto; text-align: right; }
+.model-settings-action-statuses > .model-envelope-progress { box-sizing: border-box; flex: 1 0 100%; }
+.model-settings-store-batch-result { min-width: 0; color: #cfeef2; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.model-settings-store-batch-result p { margin: 0; }
+.model-settings-store-batch-result details { margin-top: 4px; color: #ff8b9b; }
+.model-settings-store-batch-result ul { margin: 5px 0 0; padding-left: 16px; }
+:root[data-theme="light"] .model-settings-scope-switch::before { background: #d0eaf2; }
+:root[data-theme="light"] .model-settings-scope-switch > span { color: #667d91; }
+:root[data-theme="light"] .model-settings-scope-switch[aria-checked="false"] [data-scope-value="single"],
+:root[data-theme="light"] .model-settings-scope-switch[aria-checked="true"] [data-scope-value="all"],
+:root[data-theme="light"] .model-settings-store-batch-result { color: #285d70; }
+:root[data-theme="light"] .model-settings-store-batch-result details { color: #b32b42; }
+:root[data-theme="light"] .model-settings-envelope-actions .model-settings-scope-switch:focus-visible { outline-color: #087fa5; }

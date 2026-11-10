@@ -1,19 +1,11 @@
-"""文件说明：按下沉后的高低布置、安装轴向和环向顺序归并布局候选；依赖统一配置，不执行求解或写入。
-
-尺寸和环向间距属于同一结构内的优化变量；整体旋转、同型实例交换及原分组标签不产生新结构。
-"""
+"""文件说明：保存高度/半径Pareto折中，同尺寸优先下重上轻，再比较质心与其他软偏好；不放宽硬约束。"""
 
 import math
-from functools import cmp_to_key
 
 import numpy as np
 
 from app.domain.layout_config import LAYOUT_CONFIG
 from app.domain.layout_geometry import rotation_z
-
-
-# 用户要求的“基本相同”比较阈值为 1 mm。
-OBJECTIVE_TOLERANCE_MM = 1.0
 
 
 def mounting_orientation(placement):
@@ -62,39 +54,71 @@ def candidate_signature(candidate):
 
 
 def candidate_rank(candidate):
-    """返回候选的原始目标值，顺序为高度、半径、质心径向距离和质心高度。"""
+    """返回原始目标值：高度、负半径、质心高度、质心径向距离；前两项用于同级 Pareto 判断。"""
     validation = candidate["validation"]
     center = validation["center_of_mass_mm"]
     radial = validation.get("radial_com_mm", math.hypot(center[0], center[1]))
-    return candidate["height_mm"], -candidate["radius_mm"], radial, center[2]
+    return candidate["height_mm"], -candidate["radius_mm"], center[2], radial
 
 
 def compare_candidates(left, right):
-    """按用户指定的优先级比较两个候选，返回适用于 sorted 的三态结果。"""
-    left_height, left_radius, left_radial, left_center_z = candidate_rank(left)
-    right_height, right_radius, right_radial, right_center_z = candidate_rank(right)
-
-    height_delta = right_height - left_height
-    if abs(height_delta) >= OBJECTIVE_TOLERANCE_MM:
-        return -1 if height_delta > 0 else 1
-    radius_delta = right_radius - left_radius
-    if abs(radius_delta) >= OBJECTIVE_TOLERANCE_MM:
-        return -1 if radius_delta > 0 else 1
-    radial_delta = right_radial - left_radial
-    if abs(radial_delta) >= OBJECTIVE_TOLERANCE_MM:
-        return -1 if radial_delta > 0 else 1
-    if left_center_z != right_center_z:
-        return -1 if left_center_z < right_center_z else 1
-    return 0
+    """用严格排序键比较；仅用于确定性展示/等尺寸局部择优，不能用来丢弃尺寸折中。"""
+    a, b = candidate_order_key(left), candidate_order_key(right)
+    return (a > b) - (a < b)
 
 
-candidate_order_key = cmp_to_key(compare_candidates)
+def candidate_order_key(candidate):
+    """返回稳定排序键；尺寸相同时明确比较层质量反序数量和程度，再比较质心及其他软偏好。"""
+    validation = candidate["validation"]
+    rank = candidate_rank(candidate)
+    return (*rank[:2], validation.get("layer_mass_inversions", 0), validation.get("layer_mass_excess_kg", 0.0), *rank[2:],
+            candidate.get("fixed_constraint_stage") == "released",
+            validation.get("soft_symmetry_penalty", 0.0))
+
+
+def size_dominates(left, right):
+    """判断高度不高且半径不小并至少一项严格改善，不用两两容差制造循环比较。"""
+    a, b = candidate_rank(left)[:2], candidate_rank(right)[:2]
+    return all(x <= y for x, y in zip(a, b)) and any(x < y for x, y in zip(a, b))
+
+
+def rank_candidates(candidates):
+    """按尺寸非支配层排序；每层先展示最低和最粗两端，再交错展示中间折中，等尺寸按次级目标。"""
+    remaining = sorted(candidates, key=candidate_order_key)
+    result, rank = [], 0
+    while remaining:
+        front = [item for item in remaining if not any(size_dominates(other, item) for other in remaining)]
+        ordered = sorted(front, key=candidate_order_key)
+        # 最粗端同尺寸时仍选质心较优的第一项，不能简单倒序颠倒次级目标。
+        widest = min(ordered, key=lambda item: (-item["radius_mm"], candidate_order_key(item)))
+        display = [ordered[0]] + ([widest] if widest is not ordered[0] else [])
+        display.extend(item for item in ordered if all(item is not chosen for chosen in display))
+        for item in display:
+            item["pareto_rank"] = rank
+        result.extend(display)
+        front_ids = {id(item) for item in front}
+        remaining = [item for item in remaining if id(item) not in front_ids]
+        rank += 1
+    return result
 
 
 def retain_candidate(candidates, candidate):
-    """将已验收候选归入结构集合；原位更新字典，同结构只保留目标更优的一组，返回是否新增结构。"""
+    """原位更新有界候选档案；同结构允许多个尺寸折中，返回是否接受本次结果。"""
     signature = candidate_signature(candidate)
-    previous = candidates.get(signature)
-    if previous is None or compare_candidates(candidate, previous) < 0:
-        candidates[signature] = candidate
-    return previous is None
+    related = [(key, item) for key, item in candidates.items() if key[0] == signature]
+    for _, previous in related:
+        if size_dominates(previous, candidate):
+            return False
+        if candidate_rank(previous)[:2] == candidate_rank(candidate)[:2] and compare_candidates(previous, candidate) <= 0:
+            return False
+    for key, previous in related:
+        if size_dominates(candidate, previous) or candidate_rank(previous)[:2] == candidate_rank(candidate)[:2]:
+            del candidates[key]
+    key = (signature, candidate["height_mm"], candidate["radius_mm"])
+    candidates[key] = candidate
+    selected = rank_candidates(list(candidates.values()))[:LAYOUT_CONFIG["candidate_archive_limit"]]
+    selected_ids = {id(item) for item in selected}
+    for old_key in list(candidates):
+        if id(candidates[old_key]) not in selected_ids:
+            del candidates[old_key]
+    return key in candidates

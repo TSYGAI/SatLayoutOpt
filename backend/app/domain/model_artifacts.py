@@ -1,9 +1,12 @@
 """
-文件说明：把 STEP/STP 精确模型转换为保守外壳的交互与细节 GLB，并维护细节网格到 STEP 面的映射。
+文件说明：把 STEP/STP 转换为完整交互 GLB 与经精确内含校验的细节 GLB，并维护网格到 STEP 面的映射。
 本模块只负责确定性派生产物生成；原始文件存储、任务串行和 HTTP 地址由模型上传服务管理。
 """
 
 from __future__ import annotations
+
+from app.compute.monitoring import observed, stage, object_context
+
 
 from datetime import datetime, timezone
 import json
@@ -17,6 +20,7 @@ GLB_JSON_CHUNK = 0x4E4F534A
 GLB_BINARY_CHUNK = 0x004E4942
 GLB_MAGIC = 0x46546C67
 SHELL_POLICY = "conservative_exterior"
+INTERACTION_SHELL_POLICY = "all_faces_interaction"
 _CUBE_RAY_DIRECTIONS = tuple(
     (x / length, y / length, z / length)
     for x in (-1.0, 0.0, 1.0)
@@ -303,6 +307,7 @@ def _faces_belong_to_closed_solids(faces: list[object], solids: list[object]) ->
         return False
 
 
+@observed("识别可见外壳")
 def _compute_shell_map(
     imported_shape: object,
     faces: list[object],
@@ -311,7 +316,7 @@ def _compute_shell_map(
     source: dict,
     parameters: dict,
 ) -> dict:
-    """使用保守多方向射线判断外部可见面，并返回稳定 STEP 面 ID 集合。"""
+    """以射线快速保留可见面，仅剔除精确确认完全内含的面，返回稳定 STEP 面 ID 集合。"""
 
     face_ids = [f"FACE_{index:05d}" for index in range(1, len(faces) + 1)]
     retained_ids = list(face_ids)
@@ -320,6 +325,7 @@ def _compute_shell_map(
         fallback_reason = "open_or_non_solid_shape"
     else:
         from OCP.IntCurvesFace import IntCurvesFace_ShapeIntersector
+        from app.domain.model_shell_containment import FaceContainmentChecker
 
         lower, upper = bounds
         size = [upper[index] - lower[index] for index in range(3)]
@@ -331,6 +337,7 @@ def _compute_shell_map(
         try:
             intersector = IntCurvesFace_ShapeIntersector()
             intersector.Load(imported_shape.wrapped, ray_epsilon)
+            containment = FaceContainmentChecker(solids, ray_epsilon)
             retained_ids = []
             for face_id, face in zip(face_ids, faces):
                 samples = _triangle_samples(
@@ -339,7 +346,9 @@ def _compute_shell_map(
                     angular_tolerance,
                     int(parameters["shell_samples_per_face"]),
                 )
-                if _face_is_externally_visible(face, samples, intersector, ray_epsilon, ray_length):
+                # 有限采样全部被挡不能证明整张面不可见；精确内含失败必须保留。
+                if (_face_is_externally_visible(face, samples, intersector, ray_epsilon, ray_length)
+                        or not containment.contains(face)):
                     retained_ids.append(face_id)
         except Exception:
             retained_ids = list(face_ids)
@@ -396,6 +405,7 @@ def _tessellate_faces(
     all_points: list[tuple[float, float, float]] = []
     triangle_cursor = 0
     for face_index, face in enumerate(faces, start=1):
+        stage("三角化模型面", face_index=face_index, face_count=len(faces))
         face_id = f"FACE_{face_index:05d}"
         if face_id not in retained_ids:
             continue
@@ -434,6 +444,7 @@ def _tessellate_faces(
     return face_records, all_points
 
 
+@observed("编码模型 GLB")
 def _build_glb(
     face_records: list[dict],
     topology_edge_segments: list[tuple[tuple[float, float, float], tuple[float, float, float]]],
@@ -575,6 +586,7 @@ def _build_glb(
         output.write(binary_chunk)
 
 
+@observed("按质量三角化")
 def _quality_tessellation(
     imported_shape: object,
     faces: list[object],
@@ -620,6 +632,7 @@ def _quality_tessellation(
         angular_degrees = min(angular_degrees + 5.0, maximum_angular_degrees)
 
 
+@observed("生成模型预览")
 def generate_model_artifacts(
     source_path: Path,
     output_dir: Path,
@@ -628,7 +641,7 @@ def generate_model_artifacts(
     parameters: dict,
     reusable_shell_map_path: Path | None = None,
 ) -> dict:
-    """解析 STEP 源文件并生成指定质量的外壳 GLB、清单及可选面映射。
+    """解析 STEP 源文件并生成指定质量的 GLB、面清单及可选细节映射。
 
     参数：
         source_path: 作为最终数据源的 STEP/STP 文件。
@@ -650,6 +663,8 @@ def generate_model_artifacts(
     try:
         import cadquery as cq
 
+        object_context(model_id=model.get("id"), model_name=model.get("filename") or model.get("name") or model.get("id", ""))
+        stage("导入预览 STEP", file=str(source_path))
         imported = cq.importers.importStep(str(source_path))
         values = _shape_values(imported)
         faces, body_count = _shape_faces(values)
@@ -662,18 +677,37 @@ def generate_model_artifacts(
         raise ValueError("STEP 模型不包含可预览的几何面")
 
     source = _source_metadata(source_path)
-    shell_map = _load_shell_map(reusable_shell_map_path, source, parameters, len(faces))
-    if shell_map is None:
-        shell_map = _compute_shell_map(imported_shape, faces, solids, bounds, source, parameters)
+    native_interaction = quality == "interaction" and bool(parameters.get("interaction_fast_enabled", False))
+    if native_interaction:
+        parameters = {**parameters, "shell_policy": INTERACTION_SHELL_POLICY}
+        shell_map = {
+            "format_version": 1,
+            "source": source,
+            "parameters": _shell_parameters(parameters),
+            "retained_face_ids": [f"FACE_{index:05d}" for index in range(1, len(faces) + 1)],
+            "culled_face_ids": [],
+            "fallback_reason": "deferred_to_detail",
+        }
+    else:
+        shell_map = _load_shell_map(reusable_shell_map_path, source, parameters, len(faces))
+        if shell_map is None:
+            shell_map = _compute_shell_map(imported_shape, faces, solids, bounds, source, parameters)
     retained_ids = set(shell_map["retained_face_ids"])
-    face_records, all_points, actual_linear_ratio, actual_angular_degrees = _quality_tessellation(
-        imported_shape,
-        faces,
-        retained_ids,
-        bounds,
-        quality,
-        parameters,
-    )
+    native_stats: dict | None = None
+    if native_interaction:
+        face_records = []
+        all_points = []
+        actual_linear_ratio = float(parameters["interaction_linear_ratio"])
+        actual_angular_degrees = float(parameters["interaction_angular_degrees"])
+    else:
+        face_records, all_points, actual_linear_ratio, actual_angular_degrees = _quality_tessellation(
+            imported_shape,
+            faces,
+            retained_ids,
+            bounds,
+            quality,
+            parameters,
+        )
 
     topology_edges: list[object] = []
     topology_edge_segments: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = []
@@ -691,10 +725,16 @@ def generate_model_artifacts(
     output_dir.mkdir(parents=True, exist_ok=False)
     glb_path = output_dir / "preview.glb"
     shell_map_path = output_dir / "shell-map.json"
-    _build_glb(face_records, topology_edge_segments, glb_path)
+    if native_interaction:
+        from app.domain.model_native_preview import write_native_interaction_mesh
+
+        native_stats = write_native_interaction_mesh(imported_shape, glb_path, bounds, parameters, faces)
+        face_records = native_stats["face_records"]
+    else:
+        _build_glb(face_records, topology_edge_segments, glb_path)
     shell_map_path.write_text(json.dumps(shell_map, ensure_ascii=False, indent=2), encoding="utf-8")
     generated_at = datetime.now(timezone.utc).isoformat()
-    triangle_count = sum(record["triangle_count"] for record in face_records)
+    triangle_count = native_stats["triangle_count"] if native_stats else sum(record["triangle_count"] for record in face_records)
     stats = {
         "body_count": body_count,
         "face_count": len(faces),
@@ -704,13 +744,13 @@ def generate_model_artifacts(
         "triangle_count": triangle_count,
         "detail_triangle_count": triangle_count if quality == "detail" else None,
         "interaction_triangle_count": triangle_count if quality == "interaction" else None,
-        "vertex_count": sum(record["vertex_count"] for record in face_records),
+        "vertex_count": native_stats["vertex_count"] if native_stats else sum(record["vertex_count"] for record in face_records),
         "edge_count": len(topology_edges),
         "edge_segment_count": len(topology_edge_segments),
     }
-    mesh_bounds = _float_bounds(all_points)
+    mesh_bounds = native_stats["mesh_bounds"] if native_stats else _float_bounds(all_points)
     maximum_size = max(bounds[1][index] - bounds[0][index] for index in range(3))
-    actual_linear_tolerance = max(maximum_size * actual_linear_ratio, 1e-6)
+    actual_linear_tolerance = native_stats["actual_linear_tolerance"] if native_stats else max(maximum_size * actual_linear_ratio, 1e-6)
     manifest = {
         "format_version": 2,
         "generator": "SatLayoutOpt STEP exterior LOD pipeline",
@@ -732,7 +772,7 @@ def generate_model_artifacts(
             "actual_angular_radians": math.radians(actual_angular_degrees),
         },
         "shell_filter": {
-            "policy": SHELL_POLICY,
+            "policy": shell_map.get("parameters", {}).get("policy", SHELL_POLICY),
             "source_face_count": len(faces),
             "retained_face_count": len(shell_map["retained_face_ids"]),
             "culled_face_count": len(shell_map["culled_face_ids"]),
@@ -742,7 +782,7 @@ def generate_model_artifacts(
         "mesh_bounds": {"min": mesh_bounds[0], "max": mesh_bounds[1]},
         "stats": stats,
     }
-    if quality == "detail":
+    if quality == "detail" or native_interaction:
         mapping_path = output_dir / "face-map.json"
         mapping_entries = [
             {key: value for key, value in record.items() if key not in {"positions", "triangles"}}
@@ -753,7 +793,7 @@ def generate_model_artifacts(
             "model_id": model["id"],
             "source_format": "STEP",
             "mesh_format": "GLB",
-            "quality": "detail",
+            "quality": quality,
             "generated_at": generated_at,
             "entries": mapping_entries,
         }

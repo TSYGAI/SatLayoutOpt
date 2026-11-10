@@ -18,6 +18,8 @@ const projectRoot = path.resolve(frontendRoot, '..');
 const runtimeConfig = readRuntimeConfig(projectRoot);
 const legacyRouteRedirects = createLegacyRouteRedirects();
 const spaEntryPath = '/frontend/index.html';
+const frontendEntryPath = path.resolve(frontendRoot, 'index.html');
+const ignoredDevDirectories = runtimeConfig.frontend.devWatchIgnoredDirs.map((directory) => path.resolve(projectRoot, directory));
 const apiProxy = {
   '^/api(?:/|$)': {
     target: `http://${runtimeConfig.backend.host}:${runtimeConfig.backend.port}`,
@@ -65,6 +67,12 @@ function createSpaPageRoutesPlugin() {
   };
 }
 
+/** 忽略集中配置指定的后端、构建和数据目录，防止海量产物阻塞前端文件监听初始化。 */
+function isIgnoredDevPath(file) {
+  const absolute = path.resolve(file);
+  return ignoredDevDirectories.some((directory) => absolute === directory || absolute.startsWith(directory + path.sep));
+}
+
 export default defineConfig({
   root: projectRoot,
   cacheDir: path.resolve(frontendRoot, 'node_modules/.vite'),
@@ -78,6 +86,7 @@ export default defineConfig({
     allowedHosts: runtimeConfig.frontend.allowedHosts,
     proxy: apiProxy,
     fs: { allow: [projectRoot] },
+    watch: { ignored: isIgnoredDevPath },
   },
   preview: {
     host: runtimeConfig.frontend.host,
@@ -91,7 +100,7 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     rollupOptions: {
-      input: path.resolve(frontendRoot, 'index.html'),
+      input: frontendEntryPath,
     },
   },
 });

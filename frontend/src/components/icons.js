@@ -1,0 +1,62 @@
+/**
+ * 文件说明：集中导出工作台实际使用的 React 图标，避免开发模式预构建整套 Lucide 图标库。
+ * 依赖 package.json 锁定版本的单图标模块；升级 Lucide 时需通过前端构建验证这些路径与别名。
+ */
+
+export { default as ArrowDown } from 'lucide-react/dist/esm/icons/arrow-down.mjs';
+export { default as ArrowLeft } from 'lucide-react/dist/esm/icons/arrow-left.mjs';
+export { default as ArrowLeftRight } from 'lucide-react/dist/esm/icons/arrow-left-right.mjs';
+export { default as ArrowUp } from 'lucide-react/dist/esm/icons/arrow-up.mjs';
+export { default as ArrowUpDown } from 'lucide-react/dist/esm/icons/arrow-up-down.mjs';
+export { default as Box } from 'lucide-react/dist/esm/icons/box.mjs';
+export { default as Boxes } from 'lucide-react/dist/esm/icons/boxes.mjs';
+export { default as Check } from 'lucide-react/dist/esm/icons/check.mjs';
+export { default as ChevronDown } from 'lucide-react/dist/esm/icons/chevron-down.mjs';
+export { default as ChevronLeft } from 'lucide-react/dist/esm/icons/chevron-left.mjs';
+export { default as ChevronRight } from 'lucide-react/dist/esm/icons/chevron-right.mjs';
+export { default as CircleStop } from 'lucide-react/dist/esm/icons/circle-stop.mjs';
+export { default as CircleHelp } from 'lucide-react/dist/esm/icons/circle-help.mjs';
+export { default as CloudUpload } from 'lucide-react/dist/esm/icons/cloud-upload.mjs';
+export { default as Crosshair } from 'lucide-react/dist/esm/icons/crosshair.mjs';
+export { default as Cylinder } from 'lucide-react/dist/esm/icons/cylinder.mjs';
+export { default as Database } from 'lucide-react/dist/esm/icons/database.mjs';
+export { default as Download } from 'lucide-react/dist/esm/icons/download.mjs';
+export { default as Eye } from 'lucide-react/dist/esm/icons/eye.mjs';
+export { default as EyeOff } from 'lucide-react/dist/esm/icons/eye-off.mjs';
+export { default as FileText } from 'lucide-react/dist/esm/icons/file-text.mjs';
+export { default as Fingerprint } from 'lucide-react/dist/esm/icons/fingerprint-pattern.mjs';
+export { default as Funnel } from 'lucide-react/dist/esm/icons/funnel.mjs';
+export { default as GitBranch } from 'lucide-react/dist/esm/icons/git-branch.mjs';
+export { default as Grid2X2 } from 'lucide-react/dist/esm/icons/grid-2x2.mjs';
+export { default as Layers3 } from 'lucide-react/dist/esm/icons/layers.mjs';
+export { default as ListTree } from 'lucide-react/dist/esm/icons/list-tree.mjs';
+export { default as LoaderCircle } from 'lucide-react/dist/esm/icons/loader-circle.mjs';
+export { default as LockKeyhole } from 'lucide-react/dist/esm/icons/lock-keyhole.mjs';
+export { default as LockKeyholeOpen } from 'lucide-react/dist/esm/icons/lock-keyhole-open.mjs';
+export { default as Maximize } from 'lucide-react/dist/esm/icons/maximize.mjs';
+export { default as Maximize2 } from 'lucide-react/dist/esm/icons/maximize-2.mjs';
+export { default as Minus } from 'lucide-react/dist/esm/icons/minus.mjs';
+export { default as MousePointer2 } from 'lucide-react/dist/esm/icons/mouse-pointer-2.mjs';
+export { default as Move } from 'lucide-react/dist/esm/icons/move.mjs';
+export { default as PanelBottom } from 'lucide-react/dist/esm/icons/panel-bottom.mjs';
+export { default as PanelLeft } from 'lucide-react/dist/esm/icons/panel-left.mjs';
+export { default as PanelTop } from 'lucide-react/dist/esm/icons/panel-top.mjs';
+export { default as Pencil } from 'lucide-react/dist/esm/icons/pencil.mjs';
+export { default as Plus } from 'lucide-react/dist/esm/icons/plus.mjs';
+export { default as Play } from 'lucide-react/dist/esm/icons/play.mjs';
+export { default as Redo2 } from 'lucide-react/dist/esm/icons/redo-2.mjs';
+export { default as RefreshCcw } from 'lucide-react/dist/esm/icons/refresh-ccw.mjs';
+export { default as RefreshCw } from 'lucide-react/dist/esm/icons/refresh-cw.mjs';
+export { default as RotateCcw } from 'lucide-react/dist/esm/icons/rotate-ccw.mjs';
+export { default as RotateCw } from 'lucide-react/dist/esm/icons/rotate-cw.mjs';
+export { default as Satellite } from 'lucide-react/dist/esm/icons/satellite.mjs';
+export { default as Save } from 'lucide-react/dist/esm/icons/save.mjs';
+export { default as Scan } from 'lucide-react/dist/esm/icons/scan.mjs';
+export { default as Search } from 'lucide-react/dist/esm/icons/search.mjs';
+export { default as ShieldCheck } from 'lucide-react/dist/esm/icons/shield-check.mjs';
+export { default as Trash2 } from 'lucide-react/dist/esm/icons/trash.mjs';
+export { default as TriangleAlert } from 'lucide-react/dist/esm/icons/triangle-alert.mjs';
+export { default as Undo2 } from 'lucide-react/dist/esm/icons/undo-2.mjs';
+export { default as Ungroup } from 'lucide-react/dist/esm/icons/ungroup.mjs';
+export { default as Waypoints } from 'lucide-react/dist/esm/icons/waypoints.mjs';
+export { default as X } from 'lucide-react/dist/esm/icons/x.mjs';

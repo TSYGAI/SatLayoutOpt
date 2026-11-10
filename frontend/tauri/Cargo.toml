@@ -1,0 +1,42 @@
+# 文件说明：Tauri 桌面兼容壳的依赖清单；运行参数统一读取项目 TOML。
+[package]
+# Cargo 包名与生成的桌面可执行文件名。
+name = "sat-layout-desktop"
+# 依赖包版本；应用展示版本由集中配置的 packaging.version 派生。
+version = "0.3.0"
+# Rust 语言版本。
+edition = "2021"
+# 构建时生成 Tauri 上下文的入口。
+build = "build.rs"
+
+[build-dependencies]
+# 支持 TOML 派生配置与构建期上下文生成。
+tauri-build = { version = "=2.7.2", features = ["config-toml", "codegen"] }
+
+[dependencies]
+# 原生桌面窗口和 WebView2 运行时桥接。
+tauri = { version = "=2.12.3", features = ["config-toml"] }
+# 防止重复启动同一应用并发写入桌面数据。
+tauri-plugin-single-instance = "=2.5.3"
+# 仅提供回环静态资源与 API 代理，不实现业务接口。
+axum = "0.8.9"
+# 异步进程、网络和生命周期管理。
+tokio = { version = "1", features = ["full"] }
+# 不含 TLS 的本机流式 HTTP 客户端。
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json"] }
+# 集中配置及启动元数据的结构化解析。
+serde = { version = "1", features = ["derive"] }
+# Python 就绪协议与诊断元数据序列化；不作为配置文件。
+serde_json = "1"
+# 读取集中 TOML 配置。
+toml = "1"
+# 旧安装配置补齐缺项时保留用户值和中文注释，复用已锁定的间接依赖版本。
+toml_edit = "=0.20.2"
+# 复用现有锁文件版本，按系统本地日期归档单次启动日志。
+chrono = "=0.4.45"
+# 静态服务组合与请求调用。
+tower = { version = "0.5", features = ["util"] }
+# 安全的静态目录和文件服务。
+tower-http = { version = "0.6", features = ["fs"] }
+# 启动失败及后端异常退出的原生提示。
+rfd = "0.15"

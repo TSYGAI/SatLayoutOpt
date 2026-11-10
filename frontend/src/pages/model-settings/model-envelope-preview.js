@@ -8,7 +8,8 @@ import { getEnvelopePreviewConfig, getModelEnvelopePreview } from '../../api/mod
 import { disposeObject, parseGlb } from '../model-upload/model-preview-resources.js';
 import { getModelPreviewTransform } from './model-settings-state.js';
 
-export const ENVELOPE_PREVIEW_STATE_EVENT = 'sat-layout-envelope-preview-state';
+import { ENVELOPE_PREVIEW_STATE_EVENT } from './model-preview-events.js';
+export { ENVELOPE_PREVIEW_STATE_EVENT } from './model-preview-events.js';
 
 /** 将覆盖层加载状态发送给当前设置页，模型标识用于隔离迟到事件。 */
 function publishState(detail) {
@@ -77,7 +78,7 @@ export function createModelEnvelopePreview({ scene, requestRender, onChange = pu
     requestRender();
   }
 
-  /** 将源模型局部坐标包络应用与模型相同的显示变换，且保留用户相机。 */
+  /** 包络已经位于当前模型坐标，仅应用单位、比例及姿态显示变换，保留用户相机。 */
   function applyDisplay() {
     if (!root || !context) return;
     const transform = getModelPreviewTransform(context.settings);

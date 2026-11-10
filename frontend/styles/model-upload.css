@@ -709,6 +709,11 @@
   display: none;
 }
 
+/* 预览启动失败时仅恢复画布区域的按钮点击，不阻挡页面导航与左侧表单。 */
+.preview-startup button {
+  pointer-events: auto;
+}
+
 .loading-spinner {
   width: 28px;
   height: 28px;

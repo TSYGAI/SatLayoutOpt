@@ -1,0 +1,72 @@
+/* 文件说明：当前方案装载明细的独立折叠面板，宽屏表格每行两组卫星、窄屏每行一组；名称列预留较多宽度，表头和卫星名称加粗，各字段居中，XYZ 复用圆形轴标并以统一网格保持跨行对齐。 */
+
+.layout-placement-details {
+  --placement-fill: #0d151e;
+  --placement-heading: #111e2b;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--placement-fill);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.layout-placement-summary { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 10px 14px; list-style: none; cursor: pointer; }
+.layout-placement-summary::-webkit-details-marker { display: none; }
+.layout-placement-summary h3 { flex: 0 0 auto; margin: 0; font-size: 13px; font-weight: 600; }
+.layout-placement-current { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.layout-placement-count { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.layout-placement-summary > svg { flex-shrink: 0; width: 14px; height: 14px; color: var(--muted); transform: rotate(-90deg); }
+.layout-placement-details[open] > summary > svg { transform: rotate(0); }
+.layout-placement-summary:hover { background: var(--placement-heading); border-radius: 6px; }
+.layout-placement-summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; border-radius: 6px; }
+
+.layout-placement-table { width: 100%; border-collapse: collapse; table-layout: fixed; text-align: center; }
+.layout-placement-table th, .layout-placement-table td { min-width: 0; padding: 12px 8px; border-top: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
+.layout-placement-table thead { background: var(--placement-heading); color: var(--muted); font-size: 11px; }
+.layout-placement-table thead th { font-weight: 700; }
+.layout-placement-table thead th:nth-child(4n + 1) { width: 12%; }
+.layout-placement-table thead th:nth-child(4n + 2) { width: 8%; }
+.layout-placement-table thead th:nth-child(4n + 3) { width: 7%; }
+.layout-placement-table thead th:nth-child(4n) { width: 23%; }
+.layout-placement-table tbody th { font-weight: 700; }
+.layout-placement-table .layout-placement-group-start { border-left: 1px solid var(--line); }
+.layout-placement-suspension { font-variant-numeric: tabular-nums; }
+.layout-placement-coordinate-cell { container: layout-placement-coordinate / inline-size; width: 100%; min-width: 0; }
+.layout-placement-table .layout-placement-coordinates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: center; gap: 8px; width: 100%; max-width: 30em; margin-inline: auto; }
+.layout-placement-table .layout-placement-coordinates > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+.layout-placement-coordinates strong { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.layout-placement-history { padding: 14px; border-top: 1px solid var(--line); }
+.layout-placement-history h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.layout-placement-history .layout-optimization-hint { margin-top: 8px; }
+
+:root[data-theme="light"] .layout-placement-details { --placement-fill: #ffffff; --placement-heading: #f4f8fb; }
+
+@media (min-width: 901px) {
+  .layout-placement-summary { position: sticky; top: 0; z-index: 1; background: var(--placement-fill); }
+}
+
+/* 坐标列不足以完整容纳三个轴时统一纵排，避免按各行数值长度分别换行。 */
+@container layout-placement-coordinate (max-width: 260px) {
+  .layout-placement-table .layout-placement-coordinates { grid-template-columns: minmax(0, 1fr); max-width: 12em; }
+}
+
+/* 以预览区实际宽度切换布局，兼容桌面侧栏占宽和手机；轴标与数值始终成组。 */
+@container layout-preview-details (max-width: 760px) {
+  .layout-placement-table, .layout-placement-table thead, .layout-placement-table tbody { display: block; }
+  .layout-placement-table tr { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 2.3fr); }
+  .layout-placement-table th, .layout-placement-table td { display: flex; align-items: center; justify-content: center; }
+  .layout-placement-table thead th:nth-child(n) { width: auto; }
+  .layout-placement-table thead th:nth-child(n + 5), .layout-placement-table .layout-placement-empty { display: none; }
+  .layout-placement-table .layout-placement-group-start { border-left: 0; }
+}
+
+@container layout-preview-details (max-width: 420px) {
+  .layout-placement-summary { flex-wrap: wrap; gap: 4px 10px; }
+  .layout-placement-summary h3 { flex: 1 1 calc(100% - 24px); }
+  .layout-placement-summary > svg { order: 1; }
+  .layout-placement-current { order: 2; flex: 1 1 0; margin-left: 0; }
+  .layout-placement-count { order: 3; }
+  .layout-placement-table th, .layout-placement-table td { padding: 10px 6px; }
+}

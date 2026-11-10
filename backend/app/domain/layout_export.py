@@ -16,10 +16,11 @@ from app.core.config import runtime_config
 from app.domain.layout_config import LAYOUT_CONFIG
 from app.domain.layout_geometry import rotation_z
 from app.domain.model_envelope import load_step_triangle_mesh
+from app.domain.coordinate_frame import initial_to_current_matrix
 
 
 def load_body_vertices(directory, placement, model_store):
-    """返回源模型坐标下的本体顶点；旧快照回读并校验原始 STEP，缺失或摘要不同抛 ValueError。"""
+    """返回布局记录声明坐标下的本体顶点；新记录为当前模型坐标，旧快照按历史规则回读。"""
     snapshot = directory / f"{placement['record_id']}.npz"
     if snapshot.is_file():
         with np.load(snapshot, allow_pickle=False) as data:
@@ -42,6 +43,8 @@ def load_body_vertices(directory, placement, model_store):
         )
     except (FileNotFoundError, LookupError) as error:
         raise ValueError(f"{placement['name']} 的原始模型文件已缺失，无法导出本体尺寸") from error
+    if placement.get("model_coordinate_space") == "current_model_v1":
+        mesh.apply_transform(initial_to_current_matrix(record["settings"].get("coordinate_frame")))
     return np.asarray(mesh.vertices, dtype=float)
 
 

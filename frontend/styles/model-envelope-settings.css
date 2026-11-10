@@ -1,0 +1,77 @@
+/** 文件说明：统一体素分辨率与包络增量标题高度，设置标题旁的小图标及独立悬浮推荐表；固定定位避免改变侧栏尺寸，兼容深浅主题。 */
+
+.model-envelope-settings-heading { display: flex; align-items: center; gap: 4px; font-size: 16px; }
+.model-envelope-settings-heading h2,
+#safety-clearance-title { font-size: 16px; line-height: 20px; font-weight: 700; }
+
+.model-envelope-settings-input { width: calc((100% - 10px) / 2); min-width: 0; }
+.model-envelope-settings-input .model-settings-field > span { line-height: 1.6; }
+.model-envelope-resolution-hint { display: inline-block; font: inherit; color: inherit; }
+
+.envelope-resolution-help-trigger,
+.envelope-resolution-help-panel {
+  --resolution-help-bg: #101b26;
+  --resolution-help-border: #29404f;
+  --resolution-help-text: #dbe8f1;
+  --resolution-help-muted: #8da2b6;
+  --resolution-help-accent: #39d0e9;
+  --resolution-help-heading: #172937;
+}
+
+.envelope-resolution-help-trigger,
+.envelope-resolution-help-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--resolution-help-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.envelope-resolution-help-trigger:hover,
+.envelope-resolution-help-close:hover { color: var(--resolution-help-accent); background: var(--resolution-help-heading); }
+.envelope-resolution-help-trigger:focus-visible,
+.envelope-resolution-help-close:focus-visible { outline: 2px solid var(--resolution-help-accent); outline-offset: 2px; }
+.envelope-resolution-help-trigger { width: 24px; height: 24px; transform: translate(-2px, 2px); }
+.envelope-resolution-help-trigger svg { width: 0.75em; height: 0.75em; }
+.envelope-resolution-help-close { width: 22px; height: 22px; }
+.envelope-resolution-help-close svg { width: 14px; height: 14px; }
+
+.envelope-resolution-help-panel {
+  position: fixed;
+  z-index: 100;
+  box-sizing: border-box;
+  min-width: 0;
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--resolution-help-border);
+  border-radius: 8px;
+  background: var(--resolution-help-bg);
+  color: var(--resolution-help-text);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.16);
+}
+
+.envelope-resolution-help-panel header { display: grid; grid-template-columns: 22px minmax(0, 1fr) 22px; align-items: center; padding: 6px 7px; }
+.envelope-resolution-help-panel h3 { grid-column: 2; margin: 0; text-align: center; font-size: 12px; font-weight: 700; }
+.envelope-resolution-help-panel .envelope-resolution-help-close { grid-column: 3; }
+.envelope-resolution-help-panel table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; line-height: 1.5; }
+.envelope-resolution-help-panel th,
+.envelope-resolution-help-panel td { padding: 7px 3px; border-top: 1px solid var(--resolution-help-border); text-align: center; }
+.envelope-resolution-help-panel th { background: var(--resolution-help-heading); font-weight: 700; }
+.envelope-resolution-help-panel td { font-variant-numeric: tabular-nums; }
+.envelope-resolution-help-panel td span { display: inline-block; color: var(--resolution-help-muted); font-size: 9px; }
+.envelope-resolution-help-panel p { margin: 0; padding: 8px; font-size: 11px; overflow-wrap: anywhere; }
+
+:root[data-theme="light"] .envelope-resolution-help-trigger,
+:root[data-theme="light"] .envelope-resolution-help-panel {
+  --resolution-help-bg: #ffffff;
+  --resolution-help-border: #d5e0e8;
+  --resolution-help-text: #263f54;
+  --resolution-help-muted: #587184;
+  --resolution-help-accent: #087fa5;
+  --resolution-help-heading: #f3f8fb;
+}

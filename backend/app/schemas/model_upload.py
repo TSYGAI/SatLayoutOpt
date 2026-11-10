@@ -1,5 +1,5 @@
 """
-文件说明：定义模型上传与设置 API 契约，支持曲面安装点、固定或自由向上轴，六向包络增量复用领域校验。
+文件说明：定义模型上传与设置 API 契约；六向增量和各模型体素分辨率复用领域校验。
 响应由领域清单构造，字段含义在 docs/api/model-upload-api.md 中统一记录。
 """
 
@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.model_safety_clearance import default_safety_clearance, normalize_safety_clearance
+from app.domain.model_envelope_settings import default_envelope_settings, normalize_envelope_settings
+from app.domain.coordinate_frame import default_coordinate_frame, normalize_coordinate_frame
 
 
 class ModelBatchDeletePayload(BaseModel):
@@ -17,7 +19,7 @@ class ModelBatchDeletePayload(BaseModel):
 
 
 class CenterOfMassPayload(BaseModel):
-    """描述以 STEP 原点和当前模型单位表示的局部质心坐标。"""
+    """描述以当前模型坐标系及模型单位表示的质心；替换坐标系时填写数值保留。"""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -37,7 +39,7 @@ class InstallationPointPayload(BaseModel):
 
 
 class ModelSettingsPayload(BaseModel):
-    """描述单个模型可持久化的设备、变换、质心、安装基准和六向包络增量设置。"""
+    """描述单个模型可持久化的设备、变换、安装基准、六向增量及包络计算设置。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -48,6 +50,8 @@ class ModelSettingsPayload(BaseModel):
     rotation_x: Literal[0, 90, 180, 270]
     rotation_y: Literal[0, 90, 180, 270]
     rotation_z: Literal[0, 90, 180, 270]
+    coordinate_frame: dict = Field(default_factory=default_coordinate_frame)
+    expected_settings: dict | None = None
     front_orientation: Literal["+X", "-X", "+Y", "-Y", "+Z", "-Z", "free"] = Field(
         description="向上轴向，free 表示自由、不固定朝上轴；不改变预览 XYZ 旋转，沿用历史字段名。",
     )
@@ -55,6 +59,14 @@ class ModelSettingsPayload(BaseModel):
     installation_face_id: str | None = Field(default=None, pattern=r"^FACE_\d{5}$")
     installation_point: InstallationPointPayload | None = None
     safety_clearance_mm: dict[str, float] = Field(default_factory=default_safety_clearance)
+    envelope_settings: dict[str, int] = Field(default_factory=default_envelope_settings)
+
+    @field_validator("envelope_settings", mode="before")
+    @classmethod
+    def validate_envelope_settings(cls, value: object) -> dict[str, int]:
+        """复用领域规则校验每模型分辨率，拒绝空值、布尔值、浮点数和数值字符串。"""
+
+        return normalize_envelope_settings(value)
 
     @model_validator(mode="after")
     def validate_installation_reference(self):
@@ -70,6 +82,13 @@ class ModelSettingsPayload(BaseModel):
         """复用领域规则校验完整六向设置，拒绝空值、布尔值及非数值输入。"""
 
         return normalize_safety_clearance(value)
+
+    @field_validator("coordinate_frame", mode="before")
+    @classmethod
+    def validate_coordinate_frame(cls, value: object) -> dict:
+        """校验相对初始 STEP 定义的当前模型坐标系。"""
+
+        return normalize_coordinate_frame(value)
 
     @field_validator("device_name")
     @classmethod

@@ -5,10 +5,7 @@
   "scripts": {
     "start": "node scripts/start-server.js",
     "dev": "vite --config vite.config.mjs",
-    "build": "vite build --config vite.config.mjs",
-    "test:unit": "node --test ../tests/unit/frontend/*.test.mjs",
-    "test:e2e": "node ../tests/e2e/frontend/react-vite.e2e.mjs",
-    "test:e2e:pre-config-preview": "node ../tests/e2e/frontend/pre-config-preview.e2e.mjs"
+    "build": "vite build --config vite.config.mjs"
   },
   "dependencies": {
     "lucide": "0.544.0",

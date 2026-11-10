@@ -1,0 +1,76 @@
+/** 文件说明：布局参数和方案标题共享的问号、悬浮卡片与模态说明样式；卡片按两行说明的内容收紧宽度并由独立组件定位，模态长说明独立滚动，兼容深浅主题及窄屏。 */
+
+.layout-parameter-heading { display: flex; align-items: center; gap: 2px; }
+.layout-parameter-help-trigger,
+.layout-parameter-help-dialog,
+.layout-parameter-help-popover {
+  --parameter-help-bg: #101b26;
+  --parameter-help-surface: #152330;
+  --parameter-help-border: #2a4051;
+  --parameter-help-text: #dbe8f1;
+  --parameter-help-muted: #99aebf;
+  --parameter-help-accent: #55cfe3;
+  --parameter-help-tint: rgba(57, 208, 233, 0.07);
+  --parameter-help-shadow: rgba(0, 0, 0, 0.32);
+}
+.layout-parameter-help-trigger,
+.layout-parameter-help-close { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; padding: 0; border: 0; border-radius: 5px; color: var(--parameter-help-muted); background: transparent; cursor: pointer; }
+.layout-parameter-help-trigger { width: 16.5px; height: 16.5px; transform: translateY(2px); }
+.layout-parameter-help-trigger svg { display: block; width: 9.75px; height: 9.75px; stroke-width: 1.6; }
+.layout-parameter-help-trigger:hover,
+.layout-parameter-help-close:hover { color: var(--parameter-help-accent); background: var(--parameter-help-tint); }
+.layout-parameter-help-trigger:focus-visible,
+.layout-parameter-help-dialog :focus-visible { outline: 2px solid var(--parameter-help-accent); outline-offset: 2px; }
+
+.layout-parameter-help-dialog { position: fixed; inset: 0; box-sizing: border-box; width: min(880px, calc(100vw - 48px)); max-width: none; max-height: min(860px, calc(100dvh - 64px)); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--parameter-help-border); border-radius: 14px; color: var(--parameter-help-text); background: var(--parameter-help-bg); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36); font-family: inherit; }
+.layout-parameter-help-dialog::backdrop { background: rgba(3, 10, 18, 0.62); }
+.layout-parameter-help-shell { display: flex; flex-direction: column; max-height: inherit; }
+.layout-parameter-help-header { display: flex; align-items: center; flex: 0 0 auto; gap: 13px; padding: 23px 26px 20px; border-bottom: 1px solid var(--parameter-help-border); }
+.layout-parameter-help-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 38px; width: 38px; height: 38px; border: 1px solid var(--parameter-help-border); border-radius: 10px; color: var(--parameter-help-accent); background: var(--parameter-help-tint); }
+.layout-parameter-help-icon svg { width: 21px; height: 21px; stroke-width: 1.6; }
+.layout-parameter-help-header > div { min-width: 0; flex: 1; }
+.layout-parameter-help-header h2 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.5; }
+.layout-parameter-help-close { align-self: flex-start; width: 30px; height: 30px; }
+.layout-parameter-help-close svg { width: 18px; height: 18px; }
+.layout-parameter-help-body { min-height: 0; padding: 20px 26px 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--parameter-help-border) transparent; scrollbar-width: thin; }
+.layout-parameter-help-dialog.layout-parameter-help-dialog--compact { width: min(480px, calc(100vw - 24px)); }
+.layout-help-description { margin: 0; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.layout-help-list { padding-inline-start: 1.5em; list-style: decimal; }
+.layout-help-list > li + li { margin-top: 4px; }
+.layout-parameter-help-popover { --parameter-help-popover-gap: 8px; position: fixed; z-index: 1000; box-sizing: border-box; width: max-content; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); margin: 0; padding: 3px 10px; overflow-y: auto; border: 1px solid var(--parameter-help-border); border-radius: 6px; color: var(--parameter-help-text); background: var(--parameter-help-bg); box-shadow: 0 3px 10px var(--parameter-help-shadow); font-family: inherit; }
+.layout-parameter-help-popover:focus { outline: none; }
+.layout-parameter-help-popover .layout-help-description { font-size: 11px; line-height: 15px; }
+.layout-parameter-help-popover .layout-help-list > li + li { margin-top: 0; }
+.layout-parameter-help-body section + section { margin-top: 24px; }
+.layout-parameter-help-body h3 { margin: 0 0 10px; color: var(--parameter-help-accent); font-size: 13px; font-weight: 650; }
+.layout-parameter-help-body dl { margin: 0; overflow: hidden; border: 1px solid var(--parameter-help-border); border-radius: 8px; }
+.layout-parameter-help-item { display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+.layout-parameter-help-item + .layout-parameter-help-item { border-top: 1px solid var(--parameter-help-border); }
+.layout-parameter-help-item dt { padding: 15px 16px; background: var(--parameter-help-surface); font-size: 12px; font-weight: 600; line-height: 1.7; overflow-wrap: anywhere; }
+.layout-parameter-help-item dt small { display: block; margin-top: 5px; color: var(--parameter-help-muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.layout-parameter-help-item dd { margin: 0; padding: 14px 16px; border-left: 1px solid var(--parameter-help-border); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.layout-parameter-help-item dd p { margin: 0; }
+.layout-parameter-help-item dd p + p { margin-top: 5px; color: var(--parameter-help-muted); }
+.layout-parameter-help-item dd b { font-weight: 600; }
+.layout-parameter-help-footer { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; gap: 16px; padding: 14px 26px; border-top: 1px solid var(--parameter-help-border); background: var(--parameter-help-surface); }
+.layout-parameter-help-footer button { flex: 0 0 auto; padding: 8px 20px; border: 1px solid #39bdd4; border-radius: 6px; color: #062c38; background: #39bdd4; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.layout-parameter-help-footer button:hover { background: #55cfe3; }
+
+:root[data-theme="light"] .layout-parameter-help-trigger,
+:root[data-theme="light"] .layout-parameter-help-dialog,
+:root[data-theme="light"] .layout-parameter-help-popover { --parameter-help-bg: #ffffff; --parameter-help-surface: #f4f8fb; --parameter-help-border: #d6e2ea; --parameter-help-text: #263f54; --parameter-help-muted: #587184; --parameter-help-accent: #087f9c; --parameter-help-tint: #eef8fb; --parameter-help-shadow: rgba(25, 59, 84, 0.18); }
+:root[data-theme="light"] .layout-parameter-help-footer button { border-color: #0b7892; color: #ffffff; background: #0b7892; }
+:root[data-theme="light"] .layout-parameter-help-footer button:hover { background: #066d85; }
+
+@media (max-width: 600px) {
+  .layout-parameter-help-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 32px); border-radius: 10px; }
+  .layout-parameter-help-header { gap: 10px; padding: 17px 16px; }
+  .layout-parameter-help-header h2 { font-size: 17px; }
+  .layout-parameter-help-icon { display: none; }
+  .layout-parameter-help-body { padding: 16px; }
+  .layout-parameter-help-item { grid-template-columns: minmax(0, 1fr); }
+  .layout-parameter-help-item dt { padding: 11px 13px; }
+  .layout-parameter-help-item dt small { display: inline; margin-left: 10px; }
+  .layout-parameter-help-item dd { padding: 11px 13px; border-top: 1px solid var(--parameter-help-border); border-left: 0; }
+  .layout-parameter-help-footer { padding: 12px 16px; gap: 10px; }
+}

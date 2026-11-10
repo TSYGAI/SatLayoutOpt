@@ -9,6 +9,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { COORDINATE_AXIS_COLORS } from './coordinate-axes.js';
+import { PreviewRenderer } from './preview-renderer.js';
 
 const GIZMO_CAMERA_BOUND = 1.82;
 const GIZMO_CAMERA_DISTANCE = 4;
@@ -27,7 +28,10 @@ export function createOrientationGizmo(container, options) {
     0.1,
     10,
   );
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+  const renderer = new PreviewRenderer({
+    antialias: true, alpha: true, powerPreference: 'high-performance',
+    onBackendChange: updateCubeEdges,
+  });
   const pixelRatio = options.pixelRatio ?? GIZMO_DEFAULT_PIXEL_RATIO;
   renderer.setPixelRatio(pixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -50,6 +54,16 @@ export function createOrientationGizmo(container, options) {
   cube.name = 'ORIENTATION_CUBE';
   cube.add(createCubeEdges(cubeGeometry));
   scene.add(cube);
+
+  /** 后端变化时替换宽线材质，保留相同几何轮廓和屏幕线宽；旧资源立即释放。 */
+  function updateCubeEdges(name, backend) {
+    const previous = cube.children[0];
+    const edges = createCubeEdges(cubeGeometry, backend);
+    cube.remove(previous);
+    previous.geometry.dispose();
+    previous.material.dispose();
+    cube.add(edges);
+  }
 
   const faceHighlight = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({
     color: '#5ab9ae',
@@ -183,7 +197,7 @@ export function createOrientationGizmo(container, options) {
       const safeWidth = Math.max(width, 1);
       const safeHeight = Math.max(height, 1);
       renderer.setSize(safeWidth, safeHeight, false);
-      cube.children[0].material.resolution.set(safeWidth * pixelRatio, safeHeight * pixelRatio);
+      cube.children[0].material.resolution?.set(safeWidth * pixelRatio, safeHeight * pixelRatio);
       renderLatestState();
     },
     /** 解绑事件并释放方向立方体独占的 GPU 资源及 WebGL 上下文。 */
@@ -202,11 +216,13 @@ export function createOrientationGizmo(container, options) {
 }
 
 /** 为立方体创建屏幕空间宽度的描边。 */
-function createCubeEdges(cubeGeometry) {
+function createCubeEdges(cubeGeometry, backend = null) {
   const edgeSource = new THREE.EdgesGeometry(cubeGeometry, 1);
   const edgeGeometry = new LineSegmentsGeometry().fromEdgesGeometry(edgeSource);
   edgeSource.dispose();
-  const edgeMaterial = new LineMaterial({ color: 0x5a717c, linewidth: 1.25, alphaToCoverage: true });
+  const parameters = { color: 0x5a717c, linewidth: 1.25, alphaToCoverage: true };
+  if (backend) return backend.createWideLine(edgeGeometry, parameters);
+  const edgeMaterial = new LineMaterial(parameters);
   return new LineSegments2(edgeGeometry, edgeMaterial);
 }
 

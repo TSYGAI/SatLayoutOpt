@@ -1,0 +1,130 @@
+/** 文件说明：卫星设置页常驻搜索选择器样式；文字保持居中，沿用原控件 38px 高度、主题边框及绝对定位浮层。 */
+
+.model-search-control {
+  --model-search-muted: #8da2b6;
+  --model-search-text: #dbe8f1;
+  --model-search-surface: #101b26;
+  --model-search-hover: #17313e;
+  --model-search-line: rgba(132, 159, 184, 0.2);
+  --model-search-focus: rgba(57, 208, 233, 0.55);
+}
+
+:root[data-theme="light"] .model-search-control {
+  --model-search-muted: #587184;
+  --model-search-text: #263f54;
+  --model-search-surface: #f3f8fb;
+  --model-search-hover: #eaf5f8;
+  --model-search-line: rgba(80, 109, 132, 0.2);
+  --model-search-focus: rgba(8, 127, 165, 0.55);
+}
+
+.model-search-field {
+  display: grid;
+  grid-template-columns: 30px 26px minmax(0, 1fr) 26px 30px;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  box-sizing: border-box;
+  border: 1px solid var(--model-search-line);
+  border-radius: 5px;
+  color: var(--model-search-text);
+  background: var(--model-search-surface);
+}
+
+.model-search-field:focus-within,
+.model-search-control.open .model-search-field {
+  border-color: var(--model-search-focus);
+}
+
+.model-search-control .model-search-icon {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  width: 14px;
+  height: 14px;
+  color: var(--model-search-muted);
+}
+
+.model-search-control #model-settings-model-search {
+  grid-column: 2 / 5;
+  grid-row: 1;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  /* 两侧对称预留清空按钮的空间，保证有无搜索词时文字始终相对整框居中。 */
+  padding: 0 26px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.model-search-control #model-settings-model-search::placeholder {
+  color: var(--model-search-text);
+  opacity: 1;
+}
+
+.model-search-control .model-search-toggle,
+.model-search-control .model-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--model-search-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.model-search-control .model-search-toggle { grid-column: 5; grid-row: 1; }
+.model-search-control .model-search-clear { grid-column: 4; grid-row: 1; }
+.model-search-control .model-search-clear[hidden] { display: none; }
+.model-search-control .model-search-toggle svg,
+.model-search-control .model-search-clear svg { width: 14px; height: 14px; }
+.model-search-control .model-search-clear:hover { color: var(--model-search-text); }
+.model-search-control:has(input:disabled) .model-search-icon { opacity: 0.5; }
+.model-search-control input:disabled { cursor: default; }
+
+.model-search-control .model-search-options {
+  display: block;
+  max-height: 240px;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--model-search-line) transparent;
+}
+
+.model-search-control .model-search-options[hidden] { display: none; }
+.model-search-group-label { padding: 7px 11px 4px; color: var(--model-search-muted); font-size: 10px; font-weight: 400; }
+
+.model-search-control .model-search-option {
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  min-height: 38px;
+  padding: 5px 4px;
+  box-sizing: border-box;
+  color: var(--model-search-text);
+}
+
+.model-search-option > svg { justify-self: center; width: 15px; height: 15px; color: var(--model-search-muted); }
+.model-search-control .model-search-option .model-settings-model-option-label { grid-column: 2; text-align: center; }
+.model-search-option-check { justify-self: center; color: #39d0e9; }
+
+:root .model-search-control .model-search-option:hover,
+:root .model-search-control .model-search-option:focus-visible,
+:root .model-search-control .model-search-option.keyboard-active,
+:root .model-search-control .model-search-option[aria-selected="true"] {
+  color: var(--model-search-text);
+  background: var(--model-search-hover);
+}
+
+.model-search-empty { padding: 20px 12px; color: var(--model-search-muted); text-align: center; font-size: 11px; font-weight: 400; }
+.model-search-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

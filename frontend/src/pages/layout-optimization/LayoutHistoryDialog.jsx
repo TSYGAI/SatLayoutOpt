@@ -1,12 +1,15 @@
-/** 文件说明：提供历史项目重命名与删除的居中模态交互；使用原生 dialog 管理焦点，数据操作委托布局状态 Hook。 */
+/** 文件说明：复用历史项目和微调版本的重命名、删除模态交互；原生 dialog 管理焦点，错误按可读原因展示，持久化回调由使用方指定。 */
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { formatErrorMessage } from '../../utils/error-message.js';
 import { createPortal } from 'react-dom';
-import { Pencil, Trash2, X } from 'lucide-react';
+import { Pencil, Trash2, X } from '../../components/icons.js';
 import '../../../styles/layout-history-dialog.css';
 
 /** 根据目标操作显示表单或删除确认；失败保留输入，提交期间禁止重复操作与关闭。 */
-export function LayoutHistoryDialog({ target, state, fallbackFocusRef, onClose }) {
+export function LayoutHistoryDialog({ target, state, fallbackFocusRef, onClose, subject = '项目',
+  onRename = state.renameHistory, onDelete = state.deleteHistory,
+  deleteDescription = '该项目的参数、布局结果和预览快照将永久删除。' }) {
   const dialogRef = useRef(null);
   const inputRef = useRef(null);
   const cancelRef = useRef(null);
@@ -17,7 +20,7 @@ export function LayoutHistoryDialog({ target, state, fallbackFocusRef, onClose }
   const descriptionId = useId();
   const errorId = useId();
   const renaming = target.mode === 'rename';
-  const title = renaming ? '重命名项目' : '删除项目';
+  const title = `${renaming ? '重命名' : '删除'}${subject}`;
   const Icon = renaming ? Pencil : Trash2;
 
   /** 在浏览器顶层打开弹窗并锁定背景滚动，关闭后还原焦点和滚动样式。 */
@@ -62,7 +65,7 @@ export function LayoutHistoryDialog({ target, state, fallbackFocusRef, onClose }
     submittingRef.current = true;
     setFailed(false);
     try {
-      const saved = renaming ? await state.renameHistory(target.id, draft.trim()) : await state.deleteHistory(target.id);
+      const saved = renaming ? await onRename(target.id, draft.trim()) : await onDelete(target.id);
       if (saved) onClose();
       else setFailed(true);
     } finally { submittingRef.current = false; }
@@ -93,14 +96,14 @@ export function LayoutHistoryDialog({ target, state, fallbackFocusRef, onClose }
         <button className="layout-history-dialog-close" type="button" aria-label="关闭弹窗" disabled={state.busy} onClick={close}><X aria-hidden="true" /></button>
       </header>
       <div className="layout-history-dialog-body">
-        {renaming ? <label className="layout-history-dialog-field"><span>项目名称</span>
+        {renaming ? <label className="layout-history-dialog-field"><span>{subject}名称</span>
           <input ref={inputRef} value={draft} required maxLength={state.historyNameMaxLength} disabled={state.busy}
             aria-describedby={failed ? errorId : undefined} onChange={(event) => setDraft(event.target.value)} />
         </label> : <div id={descriptionId} className="layout-history-dialog-description">
-          <p>确定删除以下项目吗？</p><strong className="layout-history-dialog-project">{target.name}</strong>
-          <p>该项目的参数、布局结果和预览快照将永久删除。</p>
+          <p>确定删除以下{subject}吗？</p><strong className="layout-history-dialog-project">{target.name}</strong>
+          <p>{deleteDescription}</p>
         </div>}
-        {failed && <p id={errorId} className="layout-history-dialog-error" role="alert">{state.error || '操作未完成，请重试。'}</p>}
+        {failed && <p id={errorId} className="layout-history-dialog-error" role="alert">{formatErrorMessage(state.error, '操作未完成，请重试。')}</p>}
       </div>
       <footer className="layout-history-dialog-actions">
         <button ref={cancelRef} type="button" disabled={state.busy} onClick={close}>取消</button>

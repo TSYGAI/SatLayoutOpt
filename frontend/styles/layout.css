@@ -1,4 +1,4 @@
-/* 文件说明：SatLayoutOpt 菜单栏的唯一公共样式，负责品牌、导航、状态和响应式排列。 */
+/** 文件说明：SatLayoutOpt 公共主题、原生下拉选项及菜单栏样式；负责主题对比度、品牌导航和响应式排列。 */
 
 :root {
   color-scheme: dark;
@@ -21,6 +21,17 @@
   --cyan: #087fa5;
   --orange: #bd7217;
   --green: #1d7952;
+}
+
+/* 原生展开列表可能不继承透明的控件背景，选项需显式配对主题背景与文字。 */
+select option,
+select optgroup {
+  color: var(--text);
+  background-color: var(--bg);
+}
+
+select option:disabled {
+  color: var(--muted);
 }
 
 * {
@@ -79,28 +90,11 @@ body {
 }
 
 .brand-mark {
-  position: relative;
+  display: block;
   width: 31px;
   height: 31px;
   flex: 0 0 31px;
-  transform: rotate(30deg);
-}
-
-.brand-mark i {
-  position: absolute;
-  inset: 0;
-  border: 2px solid var(--cyan);
-  border-radius: 8px;
-}
-
-.brand-mark i:nth-child(2) {
-  border-color: var(--orange);
-  transform: rotate(60deg) scale(0.66);
-}
-
-.brand-mark i:nth-child(3) {
-  border-color: #fff;
-  transform: rotate(120deg) scale(0.4);
+  object-fit: contain;
 }
 
 .brand strong {
@@ -214,10 +208,6 @@ body {
 
 :root[data-theme="light"] .topbar {
   background: rgba(255, 255, 255, 0.92);
-}
-
-:root[data-theme="light"] .brand-mark i:nth-child(3) {
-  border-color: #17384f;
 }
 
 :root[data-theme="light"] .page-nav a {

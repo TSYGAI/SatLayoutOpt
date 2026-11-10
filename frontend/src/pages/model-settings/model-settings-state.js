@@ -1,10 +1,11 @@
 /**
- * 文件说明：规范化含曲面安装点、固定/自由向上轴及六向包络增量的模型设置，并计算预览变换。
- * 本模块不访问 DOM 或后端；后端仍是设置校验与持久化的最终权威。
+ * 文件说明：规范化含安装点、向上轴、六向增量和每模型体素分辨率的设置，并给出预览参数。
+ * 同时比较包络显示相关草稿；本模块不访问 DOM 或后端，后端仍负责包络有效性、设置校验与持久化。
  */
 
-import { Euler, Vector3 } from 'three';
 import { buildSafetyClearancePayload, normalizeSafetyClearance } from './model-safety-clearance-state.js';
+import { buildEnvelopeSettingsPayload } from './model-envelope-settings.js';
+import { defaultCoordinateFrame, normalizeCoordinateFrame } from './coordinate-frame.js';
 
 export const MODEL_SETTINGS_SELECTION_EVENT = 'sat-layout-model-settings-selection';
 export const UP_ORIENTATIONS = Object.freeze(['free', '+X', '-X', '+Y', '-Y', '+Z', '-Z']);
@@ -43,11 +44,13 @@ export function normalizeModelSettings(values = {}) {
     rotation_x: VALID_ROTATIONS.has(Number(values.rotation_x)) ? Number(values.rotation_x) : 0,
     rotation_y: VALID_ROTATIONS.has(Number(values.rotation_y)) ? Number(values.rotation_y) : 0,
     rotation_z: VALID_ROTATIONS.has(Number(values.rotation_z)) ? Number(values.rotation_z) : 0,
+    coordinate_frame: structuredClone(values.coordinate_frame ?? defaultCoordinateFrame()),
     front_orientation: values.front_orientation ?? '+Z',
     center_of_mass: normalizeCenterOfMass(values.center_of_mass),
     installation_face_id: typeof values.installation_face_id === 'string' ? values.installation_face_id : null,
     installation_point: normalizeInstallationPoint(values.installation_point),
     safety_clearance_mm: normalizeSafetyClearance(values.safety_clearance_mm),
+    ...(values.envelope_settings !== undefined ? { envelope_settings: structuredClone(values.envelope_settings) } : {}),
   };
 }
 
@@ -99,9 +102,12 @@ export function buildModelSettingsPayload(values) {
     device_name: deviceName,
     mass,
     model_scale: modelScale,
+    coordinate_frame: normalizeCoordinateFrame(normalized.coordinate_frame),
     center_of_mass: centerOfMass,
     installation_point: installationPoint,
     safety_clearance_mm: buildSafetyClearancePayload(normalized.safety_clearance_mm),
+    ...(normalized.envelope_settings !== undefined
+      ? { envelope_settings: buildEnvelopeSettingsPayload(normalized.envelope_settings) } : {}),
   };
 }
 
@@ -121,23 +127,33 @@ export function getModelPreviewTransform(values) {
   };
 }
 
-/** 计算质心经过当前单位、比例和 XYZ 旋转后的预览世界坐标。 */
-export function getCenterOfMassPreviewPosition(values) {
-  const normalized = normalizeModelSettings(values);
-  const center = normalized.center_of_mass;
-  if (!center || [center.x, center.y, center.z].some((value) => value === '' || !Number.isFinite(Number(value)))) return null;
-  const transform = getModelPreviewTransform(normalized);
-  if (!transform) return null;
-  return new Vector3(Number(center.x), Number(center.y), Number(center.z))
-    .multiplyScalar(transform.scale)
-    .applyEuler(new Euler(...transform.rotation, 'XYZ'))
-    .toArray();
-}
-
 /** 比较两份设置的规范化业务值是否完全一致。 */
 export function areModelSettingsEqual(left, right) {
   try {
     return JSON.stringify(buildModelSettingsPayload(left)) === JSON.stringify(buildModelSettingsPayload(right));
+  } catch {
+    return false;
+  }
+}
+
+/** 比较影响包络有效性的变换、六向增量与分辨率；非法输入返回 false，安装元数据不暂停覆盖层。 */
+export function areModelEnvelopeSettingsEqual(left, right) {
+  try {
+    const values = [left, right].map((value) => {
+      const settings = normalizeModelSettings(value);
+      const transform = getModelPreviewTransform(settings);
+      if (!transform) return null;
+      return {
+        model_scale: Number(settings.model_scale),
+        model_unit: settings.model_unit,
+        rotation: transform.rotation,
+        coordinate_frame: normalizeCoordinateFrame(settings.coordinate_frame),
+        safety_clearance_mm: buildSafetyClearancePayload(settings.safety_clearance_mm),
+        ...(settings.envelope_settings !== undefined
+          ? { envelope_settings: buildEnvelopeSettingsPayload(settings.envelope_settings) } : {}),
+      };
+    });
+    return values.every(Boolean) && JSON.stringify(values[0]) === JSON.stringify(values[1]);
   } catch {
     return false;
   }

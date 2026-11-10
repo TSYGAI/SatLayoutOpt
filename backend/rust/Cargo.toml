@@ -1,0 +1,40 @@
+# 文件说明：独立 Rust 业务后端依赖；运行参数统一读取 config/sat_layout_opt.toml。
+[package]
+# 独立业务服务可执行文件名。
+name = "sat-layout-api"
+# 与当前 API 兼容版本一致。
+version = "0.3.0"
+# Rust 语言版本。
+edition = "2021"
+
+[dependencies]
+# HTTP 路由和流式模型上传。
+axum = { version = "0.8.9", features = ["multipart"] }
+# 网络、进程、文件与阻塞任务隔离。
+tokio = { version = "1", features = ["full"] }
+# 流式文件响应、取消信号和有界协议帧。
+tokio-util = { version = "0.7", features = ["io", "codec", "rt"] }
+# 协议帧流消费。
+futures-util = "0.3"
+# 严格有界 NDJSON 帧缓冲，复用 Tokio 已依赖的字节类型。
+bytes = "1"
+# HTTP 跨域层与支持 Range 的流式文件响应。
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+# 请求、响应与持久化数据编码。
+serde = { version = "1", features = ["derive"] }
+# JSON 用于业务数据与计算协议；原始片段用于保持预览数组遍历顺序，不改变全局键排序。
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
+# 读取唯一集中配置。
+toml = "1"
+# 编辑硬件配置时保留原 TOML 的中文注释、顺序及无关字段；复用桌面已采用的版本。
+toml_edit = "=0.20.2"
+# 兼容既有 SQLite 数据库，内置 SQLite 避免系统版本差异。
+rusqlite = { version = "0.38", features = ["bundled"] }
+# 文件资源摘要和配置指纹。
+sha2 = "0.10"
+# 任务及记录标识。
+uuid = { version = "1", features = ["v4"] }
+# UTC 持久化时间戳。
+chrono = "0.4"
+# Windows 原子文件替换与进程树生命周期。
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_Storage_FileSystem"] }

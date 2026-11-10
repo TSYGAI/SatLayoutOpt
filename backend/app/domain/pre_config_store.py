@@ -1,6 +1,6 @@
 """
-文件说明：前置配置页的持久化存储，用 SQLite 保存按卫星类型区分的数量与自定义整流舱段参数。
-本模块只负责配置项的读写与库表初始化，不构建几何、不解析 STEP，也不处理 HTTP。
+文件说明：前置配置持久化存储，用 SQLite 保存类型数量、软硬对称设置与整流舱段参数，兼容旧表。
+本模块只负责配置读写与库表初始化，复用领域层校验外形和安装筒基座；不构建几何或处理 HTTP。
 卫星数量按数据管理页的固化记录标识逐条保存，未保存过的类型一律按 0 颗处理；
 整流舱段参数是页面级单例记录：半径和高度按区间保存，读取旧单值记录时自动扩展为等值区间。
 """
@@ -16,14 +16,24 @@ import sqlite3
 from threading import RLock
 
 from app.core.config import runtime_config
+from app.core.paths import data_root
+from app.domain.fairing_segment import FairingSegmentError, normalize_fairing_profile
+from app.domain.installation_tube import normalize_installation_base
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 FAIRING_SEGMENT_KEY = "custom_fairing_segment"
 LEGACY_CYLINDER_KEY = "custom_cylinder"
 LEGACY_SATELLITE_COUNT_KEY = "satellite_count"
 
 _SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS pre_config_satellite_symmetry (
+        record_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        mode TEXT NOT NULL DEFAULT 'hard' CHECK (mode IN ('hard', 'soft'))
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS pre_config_values (
         config_key TEXT PRIMARY KEY,
@@ -46,7 +56,7 @@ class PreConfigError(ValueError):
 
 
 class PreConfigStore:
-    """提供按类型区分的卫星数量与自定义整流舱段参数的读取和覆盖写入。"""
+    """提供按类型区分的卫星数量、对称设置与自定义整流舱段参数的读取和覆盖写入。"""
 
     def __init__(self, store_dir: Path | None = None, database_name: str | None = None) -> None:
         """创建前置配置存储并初始化数据库结构。
@@ -58,7 +68,7 @@ class PreConfigStore:
             创建存储目录和 SQLite 数据库文件。
         """
 
-        project_root = Path(__file__).resolve().parents[3]
+        project_root = data_root()
         self.store_dir = Path(store_dir or (project_root / runtime_config.pre_config_dir))
         self.database_path = self.store_dir / (database_name or runtime_config.pre_config_database_name)
         self.minimum_satellite_count = int(runtime_config.min_satellite_count)
@@ -92,11 +102,15 @@ class PreConfigStore:
             connection.close()
 
     def _initialize_schema(self) -> None:
-        """按当前版本创建缺失的配置表、卫星数量表和模式版本记录，并清理旧的单例记录。"""
+        """创建缺失表并为旧对称记录补硬约束模式；保留既有数量和尺寸，仅清理废弃单例键。"""
 
         with self._lock, self._session() as connection:
             for statement in _SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(pre_config_satellite_symmetry)")}
+            if "mode" not in columns:
+                connection.execute("ALTER TABLE pre_config_satellite_symmetry ADD COLUMN "
+                                   "mode TEXT NOT NULL DEFAULT 'hard' CHECK (mode IN ('hard', 'soft'))")
             # 旧版本的总体卫星数量与旧键名整流舱段记录不再参与读取，删除以避免残留误导。
             connection.execute(
                 "DELETE FROM pre_config_values WHERE config_key IN (?, ?)",
@@ -204,20 +218,77 @@ class PreConfigStore:
                 deleted = connection.execute("DELETE FROM pre_config_satellite_counts").rowcount
         return int(deleted)
 
+    def list_satellite_symmetry(self, record_ids: list[str]) -> dict[str, bool]:
+        """兼容返回指定类型的对称开关，不改变数量或模式。"""
+        return {record_id: item["symmetry_enabled"]
+                for record_id, item in self.list_satellite_symmetry_settings(record_ids).items()}
+
+    def list_satellite_symmetry_settings(self, record_ids: list[str]) -> dict[str, dict]:
+        """返回指定类型的对称开关和模式；未设置时默认关闭、硬约束，不改写数据库。"""
+        with self._lock, self._session() as connection:
+            rows = connection.execute("SELECT record_id, enabled, mode FROM pre_config_satellite_symmetry").fetchall()
+        stored = {row["record_id"]: {"symmetry_enabled": bool(row["enabled"]), "symmetry_mode": row["mode"]}
+                  for row in rows}
+        return {record_id: stored.get(record_id, {"symmetry_enabled": False, "symmetry_mode": "hard"})
+                for record_id in record_ids}
+
+    def save_satellite_symmetry(self, record_id: str, enabled: bool, mode: str = "hard") -> None:
+        """原子保存类型对称开关及模式；旧调用默认硬约束，非法输入抛 PreConfigError。"""
+        normalized_id = _coerce_record_id(record_id)
+        if not isinstance(enabled, bool):
+            raise PreConfigError("对称开关必须是布尔值")
+        if mode not in {"hard", "soft"}:
+            raise PreConfigError("对称模式必须为 hard 或 soft")
+        with self._lock, self._session() as connection:
+            connection.execute(
+                "INSERT INTO pre_config_satellite_symmetry (record_id, enabled, mode) VALUES (?, ?, ?) "
+                "ON CONFLICT(record_id) DO UPDATE SET enabled = excluded.enabled, mode = excluded.mode",
+                (normalized_id, int(enabled), mode),
+            )
+
+    def prune_satellite_symmetry(self, record_ids: list[str]) -> None:
+        """清理已删除固化模型的对称设置；保留当前类型的全部开关。"""
+        known = set(record_ids)
+        with self._lock, self._session() as connection:
+            rows = connection.execute("SELECT record_id FROM pre_config_satellite_symmetry").fetchall()
+            connection.executemany(
+                "DELETE FROM pre_config_satellite_symmetry WHERE record_id = ?",
+                [(row["record_id"],) for row in rows if row["record_id"] not in known],
+            )
+
     def get_fairing_segment(self) -> dict:
-        """返回已保存的自定义整流舱段参数区间；旧单值记录会兼容为两端相等的区间。"""
+        """返回整流罩外形与内部安装筒参数；旧单值记录会兼容为等值区间。"""
 
         record = self._read_value(FAIRING_SEGMENT_KEY)
         if record is None:
             radius = float(runtime_config.default_cylinder_radius_mm)
             height = float(runtime_config.default_cylinder_height_mm)
+            shell_radius = self._default_fairing_radius(radius)
+            shell_height = height + runtime_config.default_installation_base_height_mm
+            centroid_offset = self._default_axis_radius(radius)
+            profile = {
+                "form": "cylinder",
+                "segments": [{"kind": "cylinder", "radius_mm": shell_radius, "height_mm": shell_height}],
+                "total_height_mm": shell_height,
+                "max_radius_mm": shell_radius,
+            }
             return {
                 "min_radius_mm": radius,
                 "max_radius_mm": radius,
                 "min_height_mm": height,
                 "max_height_mm": height,
-                "axis_radius_mm": self._default_axis_radius(radius),
+                "axis_radius_mm": centroid_offset,
+                "centroid_max_offset_mm": centroid_offset,
                 "fairing_radius_mm": self._default_fairing_radius(radius),
+                "fairing_form": "cylinder",
+                "fairing_cylinder_radius_mm": shell_radius,
+                "fairing_cylinder_height_mm": shell_height,
+                "fairing_profile": profile,
+                "installation_tube": {"min_radius_mm": radius, "max_radius_mm": radius,
+                                      "min_height_mm": height, "max_height_mm": height,
+                                      "centroid_max_offset_mm": centroid_offset,
+                                      "base": normalize_installation_base(None, radius, radius, height,
+                                                                          self._default_fairing_radius(radius))},
                 "radial_segments": self.radial_segments,
                 "updated_at": None,
                 "stored": False,
@@ -226,14 +297,29 @@ class PreConfigStore:
             payload = json.loads(record[0])
             legacy_radius = payload.get("radius_mm")
             legacy_height = payload.get("height_mm")
-            min_radius = float(payload.get("min_radius_mm", legacy_radius))
-            max_radius = float(payload.get("max_radius_mm", legacy_radius))
-            min_height = float(payload.get("min_height_mm", legacy_height))
-            max_height = float(payload.get("max_height_mm", legacy_height))
+            installation = payload.get("installation_tube") if isinstance(payload.get("installation_tube"), dict) else payload
+            min_radius = float(installation.get("min_radius_mm", payload.get("min_radius_mm", legacy_radius)))
+            max_radius = float(installation.get("max_radius_mm", payload.get("max_radius_mm", legacy_radius)))
+            min_height = float(installation.get("min_height_mm", payload.get("min_height_mm", legacy_height)))
+            max_height = float(installation.get("max_height_mm", payload.get("max_height_mm", legacy_height)))
             self._validate_fairing_interval(min_radius, max_radius, min_height, max_height)
             segments = int(payload.get("radial_segments") or self.radial_segments)
-            axis_radius = self.normalize_axis_radius(payload.get("axis_radius_mm"), min_radius)
+            centroid_offset = self.normalize_centroid_max_offset(
+                installation.get("centroid_max_offset_mm", payload.get("centroid_max_offset_mm", payload.get("axis_radius_mm"))),
+                min_radius,
+            )
             fairing_radius = self._read_fairing_radius(payload, min_radius, max_radius)
+            base = normalize_installation_base(installation.get("base"), min_radius, max_radius, max_height, fairing_radius)
+            try:
+                fairing_profile = normalize_fairing_profile(
+                    payload.get("fairing_profile") or {"form": payload.get("fairing_form", "cylinder")},
+                    min_radius,
+                    min_height,
+                )
+            except FairingSegmentError as error:
+                raise PreConfigError(str(error)) from error
+            if fairing_radius < fairing_profile["max_radius_mm"]:
+                raise PreConfigError("整流罩边界不能小于组合外形的最大半径")
         except (TypeError, ValueError, KeyError) as error:
             raise PreConfigError("已保存的整流舱段参数记录已损坏，请重新保存") from error
         return {
@@ -241,8 +327,20 @@ class PreConfigStore:
             "max_radius_mm": max_radius,
             "min_height_mm": min_height,
             "max_height_mm": max_height,
-            "axis_radius_mm": axis_radius,
+            "axis_radius_mm": centroid_offset,
+            "centroid_max_offset_mm": centroid_offset,
             "fairing_radius_mm": fairing_radius,
+            "fairing_form": fairing_profile["form"],
+            "fairing_cylinder_radius_mm": next(
+                item["radius_mm"] for item in fairing_profile["segments"] if item["kind"] == "cylinder"
+            ),
+            "fairing_cylinder_height_mm": next(
+                item["height_mm"] for item in fairing_profile["segments"] if item["kind"] == "cylinder"
+            ),
+            "fairing_profile": fairing_profile,
+            "installation_tube": {"min_radius_mm": min_radius, "max_radius_mm": max_radius,
+                                  "min_height_mm": min_height, "max_height_mm": max_height,
+                                  "centroid_max_offset_mm": centroid_offset, "base": base},
             "radial_segments": segments,
             "updated_at": record[1],
             "stored": True,
@@ -254,30 +352,30 @@ class PreConfigStore:
         configured = max(float(runtime_config.default_axis_radius_mm), self.minimum_axis_radius_mm)
         return configured if configured < cylinder_radius else cylinder_radius / 2.0
 
-    def normalize_axis_radius(self, value: object, cylinder_radius: float) -> float:
-        """校验中轴半径：必须是正的有限数值且严格小于圆柱半径。
+    def normalize_centroid_max_offset(self, value: object, cylinder_radius: float) -> float:
+        """校验质心最大偏移：必须为正的有限数值且严格小于安装筒最小半径。
 
         参数：
-            value: 中轴半径；历史记录缺省时回落到默认值。
-            cylinder_radius: 圆柱段底面半径，单位为毫米。
+            value: 质心最大偏移；历史记录缺省时回落到默认值。
+            cylinder_radius: 安装筒最小半径，单位为毫米。
         返回：
-            可用的中轴半径，单位为毫米。
+            可用的质心最大偏移，单位为毫米。
         异常：
-            PreConfigError: 取值非法或不小于圆柱半径。
+            PreConfigError: 取值非法或不小于安装筒半径。
         """
 
         if value is None:
             return self._default_axis_radius(cylinder_radius)
         if isinstance(value, bool):
-            raise PreConfigError("中轴半径必须是正的有限数值")
+            raise PreConfigError("质心最大偏移必须是正的有限数值")
         try:
             radius = float(value)
         except (TypeError, ValueError) as error:
-            raise PreConfigError("中轴半径必须是正的有限数值") from error
+            raise PreConfigError("质心最大偏移必须是正的有限数值") from error
         if not math.isfinite(radius) or radius < self.minimum_axis_radius_mm:
-            raise PreConfigError(f"中轴半径必须是大于等于 {self.minimum_axis_radius_mm} 毫米的有限数值")
+            raise PreConfigError(f"质心最大偏移必须是大于等于 {self.minimum_axis_radius_mm} 毫米的有限数值")
         if radius >= cylinder_radius:
-            raise PreConfigError("中轴半径必须小于整流舱段底面半径")
+            raise PreConfigError("质心最大偏移必须小于安装筒半径")
         return radius
 
     def _default_fairing_radius(self, cylinder_max_radius: float) -> float:
@@ -316,7 +414,7 @@ class PreConfigStore:
         return self.normalize_fairing_radius(value, max_radius)
 
     def normalize_fairing_radius(self, value: object, cylinder_max_radius: float) -> float:
-        """校验整流罩半径必须为有限正数且严格大于整流舱最大半径。
+        """校验整流罩半径必须为有限正数且不小于安装筒最大半径。
 
         参数：
             value: 整流罩半径，单位为毫米；历史记录缺省时回落到统一配置默认值。
@@ -324,7 +422,7 @@ class PreConfigStore:
         返回：
             合法的整流罩半径，单位为毫米。
         异常：
-            PreConfigError: 取值非法、越界或不大于整流舱最大半径。
+            PreConfigError: 取值非法、越界或小于安装筒最大半径。
         """
 
         if value is None:
@@ -344,8 +442,8 @@ class PreConfigStore:
                 f"整流罩半径必须在 {self.minimum_fairing_shell_radius_mm} "
                 f"至 {self.maximum_fairing_size_mm} 毫米之间"
             )
-        if radius <= cylinder_max_radius:
-            raise PreConfigError("整流罩半径必须大于整流舱段底面半径最大值")
+        if radius < cylinder_max_radius:
+            raise PreConfigError("整流罩半径不得小于安装筒半径最大值")
         return radius
 
     def save_fairing_segment(
@@ -356,16 +454,22 @@ class PreConfigStore:
         max_height_mm: object,
         axis_radius_mm: object = None,
         fairing_radius_mm: object = None,
+        fairing_profile: dict | None = None,
+        centroid_max_offset_mm: object = None,
+        installation_base: dict | None = None,
     ) -> dict:
-        """校验并覆盖保存整流舱段尺寸区间、中轴半径与整流罩半径。
+        """校验并覆盖保存内部安装筒区间、整流罩外形、质心约束与外部边界。
 
         参数：
-            min_radius_mm: 底面半径区间最小值，单位为毫米，必须为正数。
-            max_radius_mm: 底面半径区间最大值，单位为毫米，必须不小于最小值。
-            min_height_mm: 高度区间最小值，单位为毫米，必须为正数。
-            max_height_mm: 高度区间最大值，单位为毫米，必须不小于最小值。
-            axis_radius_mm: 可选中轴（中心杆）半径；缺省时沿用已保存的值，从未保存过则用默认值。
-            fairing_radius_mm: 可选整流罩半径；缺省时沿用已保存值，从未保存过则用默认值。
+            min_radius_mm: 安装筒半径区间最小值，单位为毫米，必须为正数。
+            max_radius_mm: 安装筒半径区间最大值，单位为毫米，必须不小于最小值。
+            min_height_mm: 安装筒高度区间最小值，单位为毫米，必须为正数。
+            max_height_mm: 安装筒高度区间最大值，单位为毫米，必须不小于最小值。
+            axis_radius_mm: 兼容旧调用名，对应质心最大偏移。
+            fairing_radius_mm: 整流罩外部边界半径。
+            centroid_max_offset_mm: 质心最大偏移；优先于旧调用名。
+            installation_base: 基座独立尺寸；上底面范围由筒体半径派生，缺省加载预设尺寸。
+            fairing_profile: 独立罩体外形；省略时沿用当前形态，不再将筒体尺寸当作罩体。
         返回：
             含尺寸区间、中轴半径、整流罩半径、圆周分段与存储状态的字典。
         异常：
@@ -378,10 +482,33 @@ class PreConfigStore:
         max_height = _coerce_positive(max_height_mm, "整流舱段高度最大值")
         self._validate_fairing_interval(min_radius, max_radius, min_height, max_height)
         current = self.get_fairing_segment()
-        axis_radius = (
-            current["axis_radius_mm"] if axis_radius_mm is None
-            else self.normalize_axis_radius(axis_radius_mm, min_radius)
-        )
+        offset_value = centroid_max_offset_mm if centroid_max_offset_mm is not None else axis_radius_mm
+        if offset_value is None:
+            inherited_offset = current.get("centroid_max_offset_mm", current.get("axis_radius_mm"))
+            centroid_offset = (
+                self.normalize_centroid_max_offset(inherited_offset, min_radius)
+                if inherited_offset is not None and float(inherited_offset) < min_radius
+                else self._default_axis_radius(min_radius)
+            )
+        elif centroid_max_offset_mm is None and axis_radius_mm is not None:
+            # 旧调用把第五个位置参数称为 axis_radius_mm；保留其缩小半径时自动回落行为。
+            try:
+                centroid_offset = self.normalize_centroid_max_offset(axis_radius_mm, min_radius)
+            except PreConfigError as error:
+                try:
+                    legacy_offset = float(axis_radius_mm)
+                except (TypeError, ValueError):
+                    raise error
+                if not current.get("stored") or not math.isfinite(legacy_offset) or legacy_offset < min_radius:
+                    raise
+                centroid_offset = self._default_axis_radius(min_radius)
+        else:
+            centroid_offset = self.normalize_centroid_max_offset(offset_value, min_radius)
+        try:
+            normalized_profile = normalize_fairing_profile(
+                fairing_profile if fairing_profile is not None else current["fairing_profile"], min_radius, min_height)
+        except FairingSegmentError as error:
+            raise PreConfigError(str(error)) from error
         if fairing_radius_mm is None:
             inherited_fairing_radius = current["fairing_radius_mm"]
             fairing_radius = (
@@ -391,9 +518,13 @@ class PreConfigStore:
             )
         else:
             fairing_radius = self.normalize_fairing_radius(fairing_radius_mm, max_radius)
-        # 圆柱半径缩小时，沿用下来的中轴半径可能不再合法，此时回落到默认值。
-        if axis_radius >= min_radius:
-            axis_radius = self._default_axis_radius(min_radius)
+        if fairing_radius < normalized_profile["max_radius_mm"]:
+            raise PreConfigError("整流罩边界不能小于组合外形的最大半径")
+        try:
+            base = normalize_installation_base(installation_base, min_radius, max_radius, max_height,
+                                               fairing_radius, normalized_profile)
+        except ValueError as error:
+            raise PreConfigError(str(error)) from error
         self._write_value(
             FAIRING_SEGMENT_KEY,
             json.dumps({
@@ -401,8 +532,19 @@ class PreConfigStore:
                 "max_radius_mm": max_radius,
                 "min_height_mm": min_height,
                 "max_height_mm": max_height,
-                "axis_radius_mm": axis_radius,
+                "axis_radius_mm": centroid_offset,
+                "centroid_max_offset_mm": centroid_offset,
+                "installation_tube": {
+                    "min_radius_mm": min_radius,
+                    "max_radius_mm": max_radius,
+                    "min_height_mm": min_height,
+                    "max_height_mm": max_height,
+                    "centroid_max_offset_mm": centroid_offset,
+                    "base": {"lower_radius_mm": base["lower_radius_mm"], "height_mm": base["height_mm"]},
+                },
                 "fairing_radius_mm": fairing_radius,
+                "fairing_form": normalized_profile["form"],
+                "fairing_profile": normalized_profile,
                 "radial_segments": self.radial_segments,
             }),
         )
@@ -415,7 +557,7 @@ class PreConfigStore:
         min_height: float,
         max_height: float,
     ) -> None:
-        """校验整流舱段半径和高度区间的边界范围及端点顺序。
+        """校验内部安装筒半径和高度区间的边界范围及端点顺序。
 
         参数：
             min_radius: 底面半径最小值，单位为毫米。
@@ -428,18 +570,18 @@ class PreConfigStore:
 
         if min_radius < self.minimum_fairing_radius_mm or max_radius > self.maximum_fairing_size_mm:
             raise PreConfigError(
-                f"整流舱段底面半径区间必须在 {self.minimum_fairing_radius_mm} "
+                f"安装筒半径区间必须在 {self.minimum_fairing_radius_mm} "
                 f"至 {self.maximum_fairing_size_mm} 毫米之间"
             )
         if min_height < self.minimum_fairing_height_mm or max_height > self.maximum_fairing_size_mm:
             raise PreConfigError(
-                f"整流舱段高度区间必须在 {self.minimum_fairing_height_mm} "
+                f"安装筒高度区间必须在 {self.minimum_fairing_height_mm} "
                 f"至 {self.maximum_fairing_size_mm} 毫米之间"
             )
         if min_radius > max_radius:
-            raise PreConfigError("整流舱段底面半径最小值不得大于最大值")
+            raise PreConfigError("安装筒半径最小值不得大于最大值")
         if min_height > max_height:
-            raise PreConfigError("整流舱段高度最小值不得大于最大值")
+            raise PreConfigError("安装筒高度最小值不得大于最大值")
 
     def get_limits(self) -> dict:
         """返回前端表单直接使用的取值范围约束。"""
@@ -451,6 +593,7 @@ class PreConfigStore:
             "min_fairing_height_mm": self.minimum_fairing_height_mm,
             "max_fairing_size_mm": self.maximum_fairing_size_mm,
             "min_axis_radius_mm": self.minimum_axis_radius_mm,
+            "min_centroid_offset_mm": self.minimum_axis_radius_mm,
             "min_fairing_shell_radius_mm": self.minimum_fairing_shell_radius_mm,
         }
 

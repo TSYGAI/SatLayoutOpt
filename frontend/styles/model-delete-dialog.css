@@ -1,0 +1,47 @@
+/* 文件说明：上传模型删除弹窗的居中布局、列表和操作状态，复用全局主题变量并适配窄屏。 */
+
+.model-delete-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(440px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+  font: inherit;
+  line-height: 1.6;
+}
+
+.model-delete-dialog::backdrop { background: rgba(5, 15, 25, 0.48); backdrop-filter: blur(3px); }
+.model-delete-dialog-header { display: flex; align-items: center; gap: 12px; }
+.model-delete-dialog-header h2 { flex: 1; margin: 0; font-size: 18px; font-weight: 600; }
+.model-delete-dialog-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: rgba(180, 64, 83, 0.16); color: #ed9cac; }
+.model-delete-dialog-icon svg { width: 19px; height: 19px; }
+.model-delete-dialog-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.model-delete-dialog-close svg { width: 16px; height: 16px; }
+.model-delete-dialog-close:hover:not(:disabled) { color: var(--text); background: var(--line); }
+.model-delete-dialog-body { margin-top: 24px; color: var(--muted); font-size: 13px; }
+.model-delete-dialog-body p { margin: 0; }
+.model-delete-dialog-models { max-height: 180px; margin: 12px 0 16px; padding: 8px 12px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--line); list-style: none; }
+.model-delete-dialog-models li { padding: 4px 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.model-delete-dialog-error { margin: 12px 0 0; color: #ed9cac; font-size: 13px; overflow-wrap: anywhere; }
+.model-delete-dialog-progress { margin: 12px 0 0; color: var(--cyan); font-size: 13px; }
+.model-delete-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.model-delete-dialog-actions button { min-width: 84px; height: 36px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--line); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.model-delete-dialog-actions button:hover:not(:disabled) { border-color: var(--cyan); }
+.model-delete-dialog-actions .model-delete-dialog-confirm { border-color: #b44053; background: #b44053; color: #fff; }
+.model-delete-dialog-actions .model-delete-dialog-confirm:hover:not(:disabled) { border-color: #c65668; background: #c65668; }
+.model-delete-dialog button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.model-delete-dialog button:disabled { opacity: 0.55; cursor: not-allowed; }
+:root[data-theme="light"] .model-delete-dialog-icon,
+:root[data-theme="light"] .model-delete-dialog-error { color: #a53e50; }
+
+@media (max-width: 420px) {
+  .model-delete-dialog { padding: 20px; }
+}

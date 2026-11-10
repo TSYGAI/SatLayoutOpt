@@ -2,6 +2,8 @@
  * 文件说明：管理模型与包络共用的 GLB 解析、面映射校验及 Three.js 资源释放。
  * 本模块不持有页面或场景状态，调用方负责请求取消、模型选择及资源挂载。
  */
+import { observe, monitoredFetch } from '../../observability/runtime-log.js';
+
 
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -20,24 +22,27 @@ export function disposeObject(object) {
 
 /** 将 URL 加载的 GLB 转换为 Promise，并响应当前请求的取消信号。 */
 export function loadGlb(url, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(new DOMException('模型加载已取消', 'AbortError')); return; }
-    const loader = new GLTFLoader();
-    const onAbort = () => reject(new DOMException('模型加载已取消', 'AbortError'));
-    signal.addEventListener('abort', onAbort, { once: true });
-    loader.load(url, (gltf) => {
-      signal.removeEventListener('abort', onAbort);
-      if (signal.aborted) { disposeObject(gltf.scene); reject(new DOMException('模型加载已取消', 'AbortError')); return; }
-      resolve(gltf.scene);
-    }, undefined, (error) => {
-      signal.removeEventListener('abort', onAbort);
-      reject(new Error(`GLB 预览加载失败：${error.message || '资源不可用'}`));
-    });
-  });
+  return observe('下载并解析模型 GLB', { url }, async (operation) => {
+    signal.throwIfAborted();
+    operation.step('下载 GLB');
+    const response = await monitoredFetch(url, { signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw Object.assign(new Error(body.detail || `GLB 预览加载失败：HTTP ${response.status}`), { status: response.status });
+    }
+    const buffer = await response.arrayBuffer();
+    operation.step('解析 GLB', { bytes: buffer.byteLength });
+    return parseGlb(buffer, signal);
+  }, { signal, quiet: true });
 }
 
 /** 解析 API 返回的 GLB 字节；解析完成前被取消时释放对象并抛出 AbortError。 */
 export async function parseGlb(buffer, signal) {
+  return observe("解析模型 GLB", {bytes:buffer.byteLength}, () => parseGlbLogged(...arguments), {signal,quiet:true});
+}
+
+/** 执行解析模型 GLB；日志边界由同名公开入口管理。 */
+async function parseGlbLogged(buffer, signal) {
   signal.throwIfAborted();
   const gltf = await new GLTFLoader().parseAsync(buffer, '');
   if (signal.aborted) {

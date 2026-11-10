@@ -1,5 +1,5 @@
 """
-文件说明：提供模型上传、曲面安装基准、六向包络增量、包络生成与预览、双 LOD 资源及删除接口。
+文件说明：提供模型上传、安装基准、含各模型体素分辨率的设置、包络和双 LOD 资源接口。
 路由只负责 HTTP 映射，格式校验、存储和派生任务均委托给模型领域服务。
 """
 
@@ -60,7 +60,7 @@ def download_model(model_id: str) -> FileResponse:
 
 @router.get("/{model_id}/settings")
 def get_model_settings(model_id: str) -> dict:
-    """返回指定模型当前保存的设备、变换、质心、安装面/点和六向包络增量。"""
+    """返回指定模型当前保存的设备、变换、安装基准、六向增量和包络计算设置。"""
 
     try:
         return {"settings": service.get_model_settings(model_id)}
@@ -73,12 +73,15 @@ def update_model_settings(model_id: str, payload: ModelSettingsPayload) -> dict:
     """持久化模型设置，并返回由后端重新判定的包络有效状态。"""
 
     try:
-        excluded = {"safety_clearance_mm"} if "safety_clearance_mm" not in payload.model_fields_set else set()
-        settings = service.update_model_settings(model_id, payload.model_dump(exclude=excluded))
+        excluded = {key for key in ("safety_clearance_mm", "coordinate_frame", "envelope_settings") if key not in payload.model_fields_set}
+        excluded.add("expected_settings")
+        settings = service.update_model_settings(model_id, payload.model_dump(exclude=excluded), payload.expected_settings)
         return {
             "settings": settings,
             "envelope": service.get_model_envelope_status(model_id),
         }
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except (LookupError, ValueError, OSError) as error:
         _handle_error(error)
 
@@ -112,7 +115,7 @@ def get_latest_envelope_task() -> dict:
 
 @router.get("/{model_id}/envelope/preview.glb")
 def preview_envelope(model_id: str) -> Response:
-    """返回已有安全包络的浏览网格，与源模型共用局部坐标；失效时拒绝返回旧资源。"""
+    """返回已有安全包络的浏览网格，顶点使用当前模型局部坐标；失效时拒绝返回旧资源。"""
 
     try:
         content = service.get_model_envelope_preview(model_id)
@@ -174,6 +177,17 @@ def face_mapping(model_id: str) -> FileResponse:
     return FileResponse(path, media_type="application/json", headers={"Cache-Control": "private, max-age=31536000"})
 
 
+@router.get("/{model_id}/interaction-face-map")
+def interaction_face_mapping(model_id: str) -> FileResponse:
+    """返回完整交互网格的 STEP 面映射，使快速预览就绪后即可执行安装面拾取。"""
+
+    try:
+        path = service.get_artifact_path(model_id, "interaction_mapping")
+    except (LookupError, ValueError, OSError) as error:
+        _handle_error(error)
+    return FileResponse(path, media_type="application/json", headers={"Cache-Control": "private, max-age=31536000"})
+
+
 @router.get("/{model_id}/preview-runtime-cache")
 def preview_runtime_cache(model_id: str) -> FileResponse:
     """返回与当前双 LOD 匹配的浏览器已合并预览缓存；缓存缺失或失效时返回 404。"""
@@ -230,16 +244,19 @@ async def save_preview_runtime_cache(model_id: str, request: Request) -> Respons
 
 @router.delete("/{model_id}", status_code=204)
 def delete_model(model_id: str) -> None:
-    """删除指定模型的源文件与全部可重建派生产物。"""
+    """取消目标模型的在途转换并删除源文件与派生产物，文件故障以 JSON 错误返回。"""
 
     try:
         service.delete_model(model_id)
-    except LookupError as error:
+    except (LookupError, OSError) as error:
         _handle_error(error)
 
 
 @router.post("/batch-delete")
 def batch_delete_models(payload: ModelBatchDeletePayload) -> dict:
-    """批量删除模型并返回实际删除数量。"""
+    """逐模型取消转换并删除，返回实际删除数量；文件故障以 JSON 错误返回。"""
 
-    return {"deleted": service.delete_models(payload.ids)}
+    try:
+        return {"deleted": service.delete_models(payload.ids)}
+    except OSError as error:
+        _handle_error(error)

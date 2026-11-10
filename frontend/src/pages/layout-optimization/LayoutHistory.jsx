@@ -1,21 +1,26 @@
-/** 文件说明：展示布局历史及图标入口，由独立居中弹窗承接重命名和删除；持久化委托布局状态 Hook。 */
+/** 文件说明：展示布局历史的项目名称、任务备注及校验/搜索状态，由独立弹窗承接重命名和删除；持久化委托布局状态 Hook。 */
 
 import { useRef, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
-import { JOB_LABELS, isLayoutRunning } from './layout-state.js';
+import { ChevronDown, Pencil, Trash2 } from '../../components/icons.js';
+import { isLayoutRunning } from './layout-state.js';
+import { layoutJobPresentation, layoutJobStatusLabel } from './layout-job-progress.js';
 import { LayoutHistoryDialog } from './LayoutHistoryDialog.jsx';
 
-/** 展示单条历史及操作入口，保留旧名称回退和运行任务的删除保护。 */
+/** 展示单条历史、非空原始备注及操作入口，保留旧名称回退和运行任务的删除保护。 */
 function HistoryItem({ item, state, navigationLocked, onAction }) {
   const name = item.name || item.notes || item.job_id.slice(0, 8);
+  const hasNotes = Boolean(item.notes?.trim());
   const active = state.job?.job_id === item.job_id;
   const running = isLayoutRunning(active ? state.job : item);
+  const statusLabel = active ? layoutJobPresentation(state.job).title
+    : item.status === 'running' ? '任务进行中' : layoutJobStatusLabel(item);
 
   return <article className={`layout-history-item${active ? ' active' : ''}`} data-project-id={item.job_id}>
     <button className="layout-history-open" type="button" disabled={navigationLocked}
       aria-pressed={active} onClick={() => state.restore(item.job_id)}>
       <strong title={name}>{name}</strong>
-      <span>{new Date(item.created_at).toLocaleString()} · {JOB_LABELS[item.status]}</span>
+      <span>{new Date(item.created_at).toLocaleString()} · {statusLabel}</span>
+      {hasNotes && <span className="layout-history-notes">备注：{item.notes}</span>}
     </button>
     <div className="layout-history-actions">
       <button type="button" aria-label="重命名" title="重命名" disabled={state.busy}
@@ -34,7 +39,7 @@ export function LayoutHistory({ state }) {
   const navigationLocked = state.busy || isLayoutRunning(state.job);
   return <section className="layout-optimization-section" aria-label="历史项目">
     <details className="layout-history-list" open>
-      <summary><h3 ref={headingRef} tabIndex={-1}>历史项目</h3></summary>
+      <summary className="layout-sidebar-disclosure"><h2 className="layout-sidebar-title" ref={headingRef} tabIndex={-1}>历史项目</h2><ChevronDown aria-hidden="true" /></summary>
       <div className="layout-history-list-items">
         <div className="layout-history">
           {state.history.map((item) => <HistoryItem key={item.job_id} item={item} state={state} navigationLocked={navigationLocked} onAction={setDialog} />)}

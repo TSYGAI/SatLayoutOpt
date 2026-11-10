@@ -1,20 +1,31 @@
 """
-文件说明：从完整 STEP 或可复用旧外壳按模型姿态和六向尺寸增量生成连续外层包络，并转换浏览资源。
-本模块连接原始模型、可复用包络产物与纯几何模块；HTTP 路由、进程隔离和原子发布由上传服务负责。
+文件说明：从完整 STEP 按模型姿态和六向毫米增量向外扩张轮廓，复用同参数包络并转换浏览资源。
+本模块连接原始模型、可复用包络产物与纯几何模块并标记读取和保存进度；HTTP 路由、进程隔离和原子发布由上传服务负责。
 """
 
 from __future__ import annotations
 
+from app.compute.monitoring import observed, stage, object_context
+
+
 from datetime import datetime, timezone
 import json
 import math
+import os
+import platform
+import shutil
+import sys
 from pathlib import Path
+import traceback
+from uuid import uuid4
 
 import numpy as np
 import trimesh
 
+from app.domain.coordinate_frame import initial_to_current_matrix, normalize_coordinate_frame
 from app.domain.envelope_geometry import (
     ENVELOPE_ALGORITHM,
+    EnvelopeGenerationError,
     EnvelopeParameters,
     generate_envelope_variants,
 )
@@ -22,18 +33,6 @@ from app.domain.envelope_geometry import (
 
 MODEL_ENVELOPE_FORMAT_VERSION = 1
 UNIT_TO_MILLIMETERS = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
-_REUSABLE_ENVELOPE_ALGORITHMS = frozenset({ENVELOPE_ALGORITHM})
-_STEP_MESH_PARAMETER_KEYS = (
-    "step_linear_ratio",
-    "step_min_linear_tolerance_mm",
-    "step_angular_degrees",
-    "refinement_grid_size",
-    "refinement_direction_count",
-    "connectivity_core_inset_ratio",
-    "detail_smoothing_ratio",
-    "outline_simplify_ratio",
-    "gap_bridge_ratio",
-)
 
 
 def geometry_settings_fingerprint(settings: dict) -> dict:
@@ -45,6 +44,7 @@ def geometry_settings_fingerprint(settings: dict) -> dict:
         "rotation_x": int(settings["rotation_x"]),
         "rotation_y": int(settings["rotation_y"]),
         "rotation_z": int(settings["rotation_z"]),
+        "coordinate_frame": normalize_coordinate_frame(settings.get("coordinate_frame")),
     }
 
 
@@ -65,9 +65,14 @@ def envelope_parameters_from_dict(values: dict) -> EnvelopeParameters:
         detail_smoothing_ratio=float(values["detail_smoothing_ratio"]),
         outline_simplify_ratio=float(values["outline_simplify_ratio"]),
         gap_bridge_ratio=float(values.get("gap_bridge_ratio", 0.06)),
+        **{key: values[key] for key in (
+            "gap_bridge_limit_mm", "voxel_max_cells", "surface_batch_cells", "raster_triangle_batch", "raster_batch_cells",
+            "workspace_memory_bytes", "process_memory_limit_bytes", "memory_reserve_bytes",
+        ) if key in values},
     )
 
 
+@observed("读取预览网格")
 def load_preview_triangle_mesh(path: Path) -> trimesh.Trimesh:
     """读取细节 GLB 中全部三角形节点，应用场景变换并忽略拓扑线节点。"""
 
@@ -91,6 +96,7 @@ def load_preview_triangle_mesh(path: Path) -> trimesh.Trimesh:
     return trimesh.util.concatenate(meshes)
 
 
+@observed("读取 STEP 并三角化")
 def load_step_triangle_mesh(
     path: Path,
     *,
@@ -116,6 +122,7 @@ def load_step_triangle_mesh(
     try:
         import cadquery as cq
 
+        stage("导入 STEP", file=str(path))
         imported = cq.importers.importStep(str(path))
         values = list(imported.vals())
         if not values:
@@ -129,6 +136,7 @@ def load_step_triangle_mesh(
             diagonal * float(linear_ratio),
             float(minimum_linear_tolerance_mm),
         )
+        stage("STEP 本体三角化", file=str(path))
         vertices, faces = shape.tessellate(
             linear_tolerance,
             math.radians(float(angular_degrees)),
@@ -141,7 +149,7 @@ def load_step_triangle_mesh(
         raise ValueError("STEP 模型没有产生可用于生成包络的三角形")
     mesh = trimesh.Trimesh(
         vertices=np.asarray([vertex.toTuple() for vertex in vertices], dtype=np.float64),
-        faces=np.asarray(faces, dtype=np.int64),
+        faces=np.asarray(faces, dtype=np.int32),
         process=False,
     )
     if mesh.is_empty or not np.all(np.isfinite(mesh.vertices)):
@@ -155,6 +163,16 @@ def envelope_source_transform(mesh: trimesh.Trimesh, settings: dict) -> np.ndarr
     内禀 XYZ 与预览一致，对列向量对应 Rx·Ry·Rz，因此逐轴应用时先 Z、再 Y、最后 X。
     单位、比例或角度不合法时抛出 ValueError，不修改输入网格。
     """
+
+    frame_transform = initial_to_current_matrix(settings.get("coordinate_frame"))
+    current_mesh = mesh.copy()
+    current_mesh.apply_transform(frame_transform)
+    current_transform = envelope_current_transform(current_mesh, settings)
+    return current_transform @ frame_transform
+
+
+def envelope_current_transform(mesh: trimesh.Trimesh, settings: dict) -> np.ndarray:
+    """返回当前模型坐标到毫米包络内部坐标的仿射矩阵。"""
 
     unit = str(settings["model_unit"])
     if unit not in UNIT_TO_MILLIMETERS:
@@ -171,7 +189,9 @@ def envelope_source_transform(mesh: trimesh.Trimesh, settings: dict) -> np.ndarr
     upper = vertices.max(axis=0)
     transform = np.eye(4)
     transform[:3, :3] = basis.T
-    transform[:3, 3] = -np.asarray([(lower[0] + upper[0]) / 2.0, (lower[1] + upper[1]) / 2.0, lower[2]])
+    transform[:3, 3] = -np.asarray(
+        [(lower[0] + upper[0]) / 2.0, (lower[1] + upper[1]) / 2.0, lower[2]]
+    )
     return transform
 
 
@@ -179,14 +199,17 @@ def normalize_envelope_source_mesh(mesh: trimesh.Trimesh, settings: dict) -> tri
     """返回应用单位、比例、内禀 XYZ 旋转及居中接地变换后的网格副本。"""
 
     normalized = mesh.copy()
-    normalized.apply_transform(envelope_source_transform(mesh, settings))
+    transform = envelope_source_transform(mesh, settings)
+    normalized.apply_transform(transform)
+    normalized.metadata["source_transform"] = transform.tolist()
     return normalized
 
 
+@observed("编码包络 GLB")
 def build_envelope_preview_glb(envelope_path: Path, source_preview_path: Path, settings: dict) -> bytes:
-    """读取零度 NPZ 的连续外层显示网格并返回源模型局部坐标的 GLB，不重新计算包络。
+    """读取零度 NPZ 并返回当前模型局部坐标的 GLB；默认坐标兼容旧源坐标产物。
 
-    预览与源模型应用相同的显示变换即可重合；文件损坏时抛出 ValueError 或 OSError。
+    包络预览仅应用单位、比例及姿态即可与已转换至当前坐标的本体重合；损坏时抛出 ValueError 或 OSError。
     原 NPZ 与源 GLB 均只读；历史包络没有独立显示网格时回退到正式碰撞网格。
     """
 
@@ -201,6 +224,7 @@ def build_envelope_preview_glb(envelope_path: Path, source_preview_path: Path, s
                 data["preview_faces"] if has_preview else data["faces"],
                 dtype=np.int64,
             )
+            stored_transform = np.asarray(data["source_transform"], dtype=float) if "source_transform" in data else None
     except (KeyError, TypeError) as error:
         raise ValueError("包络文件缺少有效的顶点或三角形") from error
     if (
@@ -210,23 +234,28 @@ def build_envelope_preview_glb(envelope_path: Path, source_preview_path: Path, s
         or faces.min() < 0 or faces.max() >= len(vertices)
     ):
         raise ValueError("包络网格数据无效，请重新生成")
-    source_mesh = load_preview_triangle_mesh(source_preview_path)
-    transform = envelope_source_transform(source_mesh, settings)
+    if stored_transform is None:
+        source_mesh = load_preview_triangle_mesh(source_preview_path)
+        transform = envelope_source_transform(source_mesh, settings)
+    else:
+        if stored_transform.shape != (4, 4) or not np.all(np.isfinite(stored_transform)):
+            raise ValueError("包络生成坐标变换无效，请重新生成")
+        transform = stored_transform
     envelope = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    envelope.apply_transform(np.linalg.inv(transform))
+    envelope.apply_transform(initial_to_current_matrix(settings.get("coordinate_frame")) @ np.linalg.inv(transform))
     return envelope.export(file_type="glb")
 
 
-def _load_reusable_normalized_envelope(
+def _load_reusable_envelope(
     directory: Path | None,
     source: dict,
     settings: dict,
     parameters: dict,
-) -> tuple[trimesh.Trimesh, dict, bool] | None:
-    """从同一 STEP 和姿态的旧包络反算标准化外壳，避免重复执行 STEP 离散。
+) -> tuple[trimesh.Trimesh, dict] | None:
+    """读取同一 STEP、姿态及全部生成参数的有效包络，避免完全相同请求重复计算。
 
-    旧包络必须来自轴向仿射算法，并且 STEP 指纹、姿态及离散参数全部相同。任何缺失、
-    损坏或边界不一致都返回空值，由调用方自动回退到完整 STEP 读取。
+    方向扫掠不可逆，修改任意增量都必须重新读取原模型；不能把旧包络缩小充当原模型。
+    任何版本不符、缺失、损坏或边界不一致都返回空值，由调用方回退到完整 STEP 读取。
     """
 
     if directory is None:
@@ -234,17 +263,13 @@ def _load_reusable_normalized_envelope(
     try:
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
         previous_algorithm = manifest.get("algorithm")
-        if previous_algorithm not in _REUSABLE_ENVELOPE_ALGORITHMS:
+        if previous_algorithm != ENVELOPE_ALGORITHM:
             return None
         if manifest.get("source") != source:
             return None
         if manifest.get("geometry_settings") != geometry_settings_fingerprint(settings):
             return None
-        previous_parameters = manifest["parameters"]
-        if any(
-            float(previous_parameters[key]) != float(parameters[key])
-            for key in _STEP_MESH_PARAMETER_KEYS
-        ):
+        if manifest["parameters"] != parameters:
             return None
         variant = next(item for item in manifest["variants"] if int(item["rot_z"]) == 0)
         file_name = str(variant["file_name"])
@@ -262,6 +287,8 @@ def _load_reusable_normalized_envelope(
         with np.load(directory / file_name, allow_pickle=False) as data:
             vertices = np.asarray(data["vertices"], dtype=np.float64)
             faces = np.asarray(data["faces"], dtype=np.int64)
+            quality = json.loads(str(data["envelope_quality"].item())) if "envelope_quality" in data else {}
+            transform = data["source_transform"].tolist() if "source_transform" in data else None
         vertex_count = int(source_summary["vertex_count"])
         triangle_count = int(source_summary["triangle_count"])
     except (OSError, ValueError, TypeError, KeyError, StopIteration, json.JSONDecodeError):
@@ -292,16 +319,12 @@ def _load_reusable_normalized_envelope(
     actual_target_bounds = np.vstack((vertices.min(axis=0), vertices.max(axis=0)))
     if not np.allclose(actual_target_bounds, target_bounds, rtol=0.0, atol=tolerance):
         return None
-    normalized_vertices = source_bounds[0] + (
-        (vertices - target_bounds[0]) * (source_extent / target_extent)
-    )
-    reusable = trimesh.Trimesh(vertices=normalized_vertices, faces=faces, process=False)
-    source_tolerance = max(float(np.max(source_extent)) * 1e-8, 1e-8)
-    if not np.allclose(np.asarray(reusable.bounds), source_bounds, rtol=0.0, atol=source_tolerance):
-        return None
-    is_outer_hull = previous_algorithm == ENVELOPE_ALGORITHM
-    if is_outer_hull and (
-        reusable.body_count != 1
+    reusable = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    reusable.metadata["envelope_quality"] = quality
+    if transform is not None:
+        reusable.metadata["source_transform"] = transform
+    if (
+        reusable.body_count < 1
         or not reusable.is_watertight
         or not reusable.is_winding_consistent
     ):
@@ -311,10 +334,77 @@ def _load_reusable_normalized_envelope(
         "bbox_max": source_bounds[1].tolist(),
         "vertex_count": vertex_count,
         "triangle_count": triangle_count,
-    }, is_outer_hull
+    }
 
 
-def generate_model_envelope(
+def _load_reusable_source_mesh(
+    directory: Path | None,
+    source: dict,
+    settings: dict,
+    parameters: dict,
+) -> tuple[trimesh.Trimesh, dict] | None:
+    """读取同一源文件、姿态和 STEP 离散参数的标准化网格，避免六向修改重复读取 STEP。"""
+
+    if directory is None:
+        return None
+    step_keys = {
+        "step_linear_ratio",
+        "step_min_linear_tolerance_mm",
+        "step_angular_degrees",
+    }
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("algorithm") != ENVELOPE_ALGORITHM
+            or manifest.get("source") != source
+            or manifest.get("geometry_settings") != geometry_settings_fingerprint(settings)
+            or any(manifest.get("parameters", {}).get(key) != parameters.get(key) for key in step_keys)
+        ):
+            return None
+        file_name = str(manifest.get("source_mesh_file", "source_mesh.npz"))
+        if Path(file_name).name != file_name:
+            return None
+        summary = manifest["source_mesh"]
+        with np.load(directory / file_name, allow_pickle=False) as data:
+            vertices = np.asarray(data["vertices"], dtype=np.float64)
+            faces = np.asarray(data["faces"], dtype=np.int64)
+            transform = data["source_transform"].tolist() if "source_transform" in data else None
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+    if (
+        vertices.ndim != 2
+        or vertices.shape[1] != 3
+        or len(vertices) < 4
+        or not np.all(np.isfinite(vertices))
+        or faces.ndim != 2
+        or faces.shape[1] != 3
+        or len(faces) < 4
+        or faces.min() < 0
+        or faces.max() >= len(vertices)
+    ):
+        return None
+    try:
+        expected_bounds = np.asarray([summary["bbox_min"], summary["bbox_max"]], dtype=np.float64)
+    except (KeyError, TypeError, ValueError):
+        return None
+    actual_bounds = np.vstack((vertices.min(axis=0), vertices.max(axis=0)))
+    if expected_bounds.shape != (2, 3) or not np.all(np.isfinite(expected_bounds)):
+        return None
+    tolerance = max(float(np.max(expected_bounds[1] - expected_bounds[0])) * 1e-8, 1e-8)
+    if expected_bounds.shape != (2, 3) or not np.allclose(actual_bounds, expected_bounds, rtol=0.0, atol=tolerance):
+        return None
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    if transform is not None:
+        mesh.metadata["source_transform"] = transform
+    return mesh, {
+        "bbox_min": actual_bounds[0].tolist(),
+        "bbox_max": actual_bounds[1].tolist(),
+        "vertex_count": int(len(vertices)),
+        "triangle_count": int(len(faces)),
+    }
+
+
+def _generate_model_envelope(
     source_step_path: Path,
     output_dir: Path,
     model: dict,
@@ -324,22 +414,33 @@ def generate_model_envelope(
 ) -> dict:
     """优先复用旧外壳，否则从完整 STEP 生成唯一连续外层包络和 UTF-8 清单。"""
 
-    reusable = _load_reusable_normalized_envelope(
+    from app.domain.envelope_progress import report_envelope_progress
+    report_envelope_progress("source_loading")
+    reusable = _load_reusable_envelope(
         reusable_envelope_dir,
         source,
         model["settings"],
         parameters,
     )
-    if reusable is None:
-        mesh = normalize_envelope_source_mesh(
-            load_step_triangle_mesh(
+    source_reuse = None if reusable is not None else _load_reusable_source_mesh(
+        reusable_envelope_dir,
+        source,
+        model["settings"],
+        parameters,
+    )
+    report_envelope_progress("source_loading", 1, 1)
+    if reusable is None and source_reuse is None:
+        from app.domain.envelope_resources import envelope_stage
+        with envelope_stage("step_tessellation"):
+            raw = load_step_triangle_mesh(
                 source_step_path,
                 linear_ratio=float(parameters["step_linear_ratio"]),
                 minimum_linear_tolerance_mm=float(parameters["step_min_linear_tolerance_mm"]),
                 angular_degrees=float(parameters["step_angular_degrees"]),
-            ),
-            model["settings"],
-        )
+            )
+        with envelope_stage("source_normalization"):
+            mesh = normalize_envelope_source_mesh(raw, model["settings"])
+        del raw
         bounds = np.asarray(mesh.bounds, dtype=float)
         source_mesh = {
             "bbox_min": bounds[0].tolist(),
@@ -348,20 +449,36 @@ def generate_model_envelope(
             "triangle_count": int(len(mesh.faces)),
         }
         input_mode = "step_tessellation"
-        source_is_outer_hull = False
+    elif reusable is None:
+        mesh, source_mesh = source_reuse
+        input_mode = "reused_source_mesh"
     else:
-        mesh, source_mesh, source_is_outer_hull = reusable
+        mesh, source_mesh = reusable
         input_mode = "reused_envelope"
     geometry_parameters = envelope_parameters_from_dict(parameters)
     variants = generate_envelope_variants(
         mesh,
         output_dir,
         geometry_parameters,
-        source_is_outer_hull=source_is_outer_hull,
+        source_is_envelope=reusable is not None,
     )
+    report_envelope_progress("artifact_write")
+    source_mesh_file = None
+    if reusable_envelope_dir is not None and (source_reuse is not None or reusable is not None) and (reusable_envelope_dir / "source_mesh.npz").is_file():
+        shutil.copy2(reusable_envelope_dir / "source_mesh.npz", output_dir / "source_mesh.npz")
+        source_mesh_file = "source_mesh.npz"
+    elif reusable is None:
+        # 此时 mesh 一定是 STEP 离散网格或其标准化缓存，不能把正式包络写成源网格。
+        np.savez_compressed(
+            output_dir / "source_mesh.npz",
+            vertices=np.asarray(mesh.vertices, dtype=np.float64),
+            faces=np.asarray(mesh.faces, dtype=np.int64),
+            source_transform=np.asarray(mesh.metadata.get("source_transform", np.eye(4))),
+        )
+        source_mesh_file = "source_mesh.npz"
     manifest = {
         "format_version": MODEL_ENVELOPE_FORMAT_VERSION,
-        "generator": "SatLayoutOpt axis-scaled azimuthally refined outer hull envelope pipeline",
+        "generator": "SatLayoutOpt exterior occupancy directional sweep pipeline",
         "algorithm": ENVELOPE_ALGORITHM,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model_id": model["id"],
@@ -369,6 +486,8 @@ def generate_model_envelope(
         "geometry_settings": geometry_settings_fingerprint(model["settings"]),
         "parameters": dict(parameters),
         "input_mode": input_mode,
+        "generation_mode": "strict_refined",
+        "fallback_used": False,
         "normalization": {
             "unit": "mm",
             "center_xy": True,
@@ -384,15 +503,140 @@ def generate_model_envelope(
                 "vertex_count": variant.vertex_count,
                 "triangle_count": variant.triangle_count,
                 "watertight": variant.watertight,
+                "quality": variant.quality,
             }
             for variant in variants
         ],
     }
+    if source_mesh_file is not None:
+        manifest["source_mesh_file"] = source_mesh_file
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    report_envelope_progress("artifact_write", 1, 1)
     return manifest
+
+
+def _failure_report_path(source_step_path: Path, model: dict, explicit: Path | None) -> Path:
+    """返回独立包络失败报告路径；报告不写入会被清理的任务暂存目录。"""
+
+    if explicit is not None:
+        return explicit
+    if os.environ.get("SAT_LAYOUT_ENVELOPE_DIAGNOSTIC_PATH"):
+        return Path(os.environ["SAT_LAYOUT_ENVELOPE_DIAGNOSTIC_PATH"])
+    try:
+        from app.core.config import runtime_config
+        from app.core.paths import data_root
+
+        directory = data_root() / runtime_config.model_envelope_failure_log_dir
+    except Exception:
+        directory = source_step_path.resolve().parents[3] / "data/logs/envelope"
+    return directory / f"{model.get('id', 'unknown')}-{uuid4().hex}.json"
+
+
+def _write_failure_report(
+    path: Path,
+    error: Exception,
+    source_step_path: Path,
+    model: dict,
+    parameters: dict,
+) -> None:
+    """写入包含硬件、软件、阶段和重试记录的独立 JSON 失败报告。"""
+
+    hardware: dict = {"cpu_count": os.cpu_count()}
+    try:
+        import psutil
+
+        memory = psutil.virtual_memory()
+        hardware.update({
+            "memory_total_bytes": int(memory.total),
+            "memory_available_bytes": int(memory.available),
+            "process_rss_bytes": int(psutil.Process().memory_info().rss),
+        })
+    except Exception as memory_error:
+        hardware["memory_probe_error"] = f"{type(memory_error).__name__}: {memory_error}"
+    versions = {}
+    from importlib.metadata import PackageNotFoundError, version
+    for module_name in ("numpy", "scipy", "scikit-image", "manifold3d", "shapely", "trimesh", "cadquery", "cadquery-ocp", "psutil"):
+        try:
+            versions[module_name] = version(module_name)
+        except PackageNotFoundError:
+            versions[module_name] = "unavailable"
+        except Exception as version_error:
+            versions[module_name] = f"unavailable: {type(version_error).__name__}"
+    payload = {
+        "report_version": 1,
+        "status": "failed",
+        "reported_at": datetime.now(timezone.utc).isoformat(),
+        "operation": "envelope.generate",
+        "model_id": model.get("id"),
+        "source_filename": source_step_path.name,
+        "source_size_bytes": source_step_path.stat().st_size if source_step_path.exists() else None,
+        "stage": getattr(error, "stage", getattr(error, "envelope_stage", "cache_or_artifact_write")),
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "attempts": getattr(error, "attempts", []),
+        "hardware": hardware,
+        "software": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "modules": versions,
+        },
+        "parameters": dict(parameters),
+        "traceback": traceback.format_exc(),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@observed("生成安全包络")
+def generate_model_envelope(
+    source_step_path: Path,
+    output_dir: Path,
+    model: dict,
+    source: dict,
+    parameters: dict,
+    reusable_envelope_dir: Path | None = None,
+    failure_report_path: Path | None = None,
+) -> dict:
+    """生成严格精细包络；任何失败先写独立诊断报告，再向调用方抛出异常。"""
+
+    report_path = _failure_report_path(source_step_path, model, failure_report_path)
+    isolated = os.environ.get("SAT_LAYOUT_ENVELOPE_ISOLATED") == "1"
+    def report_progress(stage):
+        """保存运行阶段快照，原生崩溃时仍有资源与软件证据；成功后删除快照。"""
+        error = EnvelopeGenerationError("任务尚未完成；若工作进程异常退出，本文件记录最后执行阶段", stage=stage)
+        _write_failure_report(report_path, error, source_step_path, model, parameters)
+        snapshot = json.loads(report_path.read_text(encoding="utf-8"))
+        snapshot["status"] = "running"
+        report_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        from app.domain.envelope_resources import EnvelopeResourceGuard
+        def report_failure(error):
+            """资源监控线程通过同一诊断入口保存当前模型的失败报告。"""
+            _write_failure_report(report_path, error, source_step_path, model, parameters)
+        if isolated:
+            report_progress("initialization")
+        with EnvelopeResourceGuard(envelope_parameters_from_dict(parameters), report_failure, report_progress if isolated else None) as guard:
+            manifest = _generate_model_envelope(source_step_path, output_dir, model, source, parameters, reusable_envelope_dir)
+            manifest["resources_observed"] = guard.observed
+            (output_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            if isolated:
+                report_path.unlink(missing_ok=True)
+            return manifest
+    except Exception as error:
+        try:
+            _write_failure_report(report_path, error, source_step_path, model, parameters)
+        except Exception as report_error:
+            error.add_note(f"独立失败报告写入失败：{report_path}；{report_error}")
+            print(f"独立包络失败报告写入失败：{report_path}；{report_error}", file=sys.stderr, flush=True)
+        raise
 
 
 def _rotate_vertices_x(vertices: np.ndarray, degrees: int) -> np.ndarray:

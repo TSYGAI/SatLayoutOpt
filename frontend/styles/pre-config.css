@@ -1,4 +1,103 @@
-/* 文件说明：前置配置页补充样式，定义卫星数量、整流舱/整流罩参数与预览工具栏；整体分栏复用模型上传页。 */
+/* 文件说明：前置配置分组、与数量输入列对齐的清零操作、固定组列表及世界位姿浮窗；复用页面按钮与主题配色，兼容深浅主题和小视口。 */
+
+.fixed-constraints-form { font-size: 13px; line-height: 1.6; }
+.fixed-draft-status { margin: 10px 0; color: #8da2b6; font-size: 11px; }
+.fixed-leave-dialog { max-width: min(420px, calc(100vw - 32px)); padding: 24px; border: 1px solid #29404f; border-radius: 8px; color: #dbe8f1; background: #101b26; }
+.fixed-leave-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.fixed-leave-dialog h2 { margin-top: 0; font-size: 18px; }
+.fixed-leave-dialog p { font-size: 13px; line-height: 1.6; }
+.fixed-leave-dialog footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+:root[data-theme="light"] .fixed-draft-status { color: #587184; }
+:root[data-theme="light"] .fixed-leave-dialog { color: #263f54; background: #fff; border-color: #bacbd7; }
+.fixed-constraint-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fixed-constraint-heading h2 { margin: 0; }
+.fixed-constraint-heading .pre-config-action-button { flex: 0 0 auto; }
+.fixed-group-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.fixed-group-item { min-width: 0; overflow: hidden; border: 1px solid rgba(132, 159, 184, 0.16); border-radius: 5px; background: #0d1720; }
+.fixed-group-item.is-selected { border-color: rgba(57, 208, 233, 0.45); }
+/* 下拉框与整行展开按钮是独立控件；共用网格行使箭头保持在最右侧，选择类型不会触发展开。 */
+.fixed-group-item .fixed-group-heading { grid-template-columns: minmax(0, 1fr) 82px 34px; padding: 0; gap: 0; border: 0; border-radius: 0; }
+.fixed-group-item .fixed-group-trigger { grid-column: 1 / -1; grid-row: 1; display: grid; grid-template-columns: minmax(0, 1fr) 82px 16px; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 47px; padding: 7px 9px; border: 0; border-radius: 0; color: inherit; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.fixed-group-heading .fixed-constraint-mode { grid-column: 2; grid-row: 1; z-index: 1; justify-self: end; width: auto; min-width: 0; cursor: pointer; }
+.fixed-group-trigger > svg { grid-column: 3; width: 16px; height: 16px; color: #71879a; }
+.fixed-group-trigger[aria-expanded="true"] { background: #0d2a33; }
+.fixed-group-trigger[aria-expanded="true"] > svg { color: #39d0e9; transform: rotate(180deg); }
+.fixed-group-trigger:hover:not(:disabled) { background: #101b26; }
+.fixed-group-trigger:focus-visible { outline: 2px solid #39d0e9; outline-offset: -2px; }
+.fixed-group-trigger:disabled { opacity: 0.45; cursor: not-allowed; }
+.fixed-constraints-form .fixed-group-details { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 12px; border: 0; border-top: 1px solid rgba(132, 159, 184, 0.16); }
+.fixed-group-details > p { margin: 0; color: #8da2b6; font-size: 11px; overflow-wrap: anywhere; }
+.fixed-group-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.fixed-group-clearance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.fixed-group-clearance > div { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid rgba(132, 159, 184, 0.16); border-radius: 5px; background: rgba(57, 208, 233, 0.04); }
+.fixed-group-clearance span { color: #8da2b6; font-size: 10px; }
+.fixed-group-clearance strong { color: #dbe8f1; font-size: 12px; }
+.fixed-info-card { display: grid; gap: 10px; min-width: 0; margin-top: 16px; padding: 12px; border: 1px solid rgba(132, 159, 184, 0.18); border-radius: 6px; background: rgba(13, 23, 32, 0.55); overflow-wrap: anywhere; }
+.fixed-info-card > p { margin: 0; }
+.fixed-info-status { color: #39d0e9; font-size: 12px; font-weight: 700; }
+.fixed-validation-summary { display: grid; gap: 7px; }
+.fixed-summary-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #dbe8f1; font-size: 12px; }
+.fixed-summary-heading > span { color: #8da2b6; font-size: 10px; }
+.fixed-center-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.fixed-center-values > div { min-width: 0; padding: 6px 8px; border: 1px solid rgba(132, 159, 184, 0.2); border-radius: 5px; background: #101b26; }
+.fixed-center-values dt { color: #8da2b6; font-size: 10px; font-weight: 700; }
+.fixed-center-values dd { margin: 0; color: #dbe8f1; font-size: 11px; font-variant-numeric: tabular-nums; }
+.fixed-validation-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: #8da2b6; font-size: 11px; }
+.fixed-validation-metrics span { display: grid; gap: 2px; }
+.fixed-validation-metrics b { color: #dbe8f1; font-size: 12px; }
+.fixed-constraint-heading > .pre-config-action-button { height: 29px; padding: 0 10px; gap: 5px; font-size: 10px; }
+.fixed-constraint-heading > .pre-config-action-button svg { width: 11px; height: 11px; }
+.fixed-validation-summary > ul { margin: 0; padding-left: 18px; color: #ff849e; font-size: 11px; }
+.fixed-constraints-form [role="alert"] { color: #ff849e; }
+:root[data-theme="light"] .fixed-group-clearance > div, :root[data-theme="light"] .fixed-info-card { border-color: rgba(74, 103, 127, 0.16); background: #f7fafc; }
+:root[data-theme="light"] .fixed-group-clearance strong, :root[data-theme="light"] .fixed-summary-heading, :root[data-theme="light"] .fixed-center-values dd, :root[data-theme="light"] .fixed-validation-metrics b { color: #263f54; }
+:root[data-theme="light"] .fixed-center-values > div { border-color: rgba(74, 103, 127, 0.2); background: #fff; }
+:root[data-theme="light"] .fixed-center-values dt, :root[data-theme="light"] .fixed-summary-heading > span { color: #587184; }
+:root[data-theme="light"] .fixed-info-status { color: #087fa5; }
+:root[data-theme="light"] .fixed-group-clearance span, :root[data-theme="light"] .fixed-validation-metrics { color: #587184; }
+:root[data-theme="light"] .fixed-group-item { border-color: rgba(74, 103, 127, 0.16); background: #f7fafc; }
+:root[data-theme="light"] .fixed-group-item.is-selected { border-color: rgba(8, 127, 165, 0.4); }
+:root[data-theme="light"] .fixed-group-item .fixed-group-trigger[aria-expanded="true"] { background: #e8f6fb; }
+:root[data-theme="light"] .fixed-group-trigger:hover:not(:disabled) { background: #ffffff; }
+:root[data-theme="light"] .fixed-group-trigger[aria-expanded="true"] > svg { color: #0a4f66; }
+:root[data-theme="light"] .fixed-group-details { border-top-color: rgba(74, 103, 127, 0.16); }
+:root[data-theme="light"] .fixed-group-details > p { color: #587184; }
+
+.fixed-pose-overlay { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.fixed-mount-rotation-controls { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.fixed-mount-rotation-controls[hidden] { display: none; }
+.fixed-mount-rotation-button { position: absolute; transform: translateY(-50%); pointer-events: auto; min-width: 64px; height: 34px; padding: 4px 10px; border: 1px solid #39d0e9; border-radius: 6px; background: rgba(13, 23, 32, 0.95); color: #dbe8f1; font: 600 14px sans-serif; cursor: pointer; box-shadow: 0 2px 8px #0003; }
+.fixed-mount-rotation-button:hover { background: #164252; }
+.fixed-mount-rotation-button:focus-visible { outline: 2px solid #39d0e9; outline-offset: 2px; }
+.fixed-mount-rotation-button:disabled { opacity: 0.45; cursor: not-allowed; }
+:root[data-theme="light"] .fixed-mount-rotation-button { background: rgba(255, 255, 255, 0.96); color: #14506b; border-color: #1595ba; }
+:root[data-theme="light"] .fixed-mount-rotation-button:hover { background: #e8f6fb; }
+/* 初始化或新增固定组尚未显示时提示加载；已有模型编辑期间即时反馈，正式校验在后台进行。 */
+.fixed-preview-loading { z-index: 5; background: rgba(3, 8, 12, 0.52); }
+:root[data-theme="light"] .fixed-preview-loading { background: rgba(238, 244, 248, 0.65); }
+@media (prefers-reduced-motion: reduce) {
+  .fixed-preview-loading .loading-spinner { animation: none; }
+}
+.fixed-pose-dialog { position: absolute; top: 44px; right: 12px; width: min(290px, calc(100% - 24px)); max-height: calc(100% - 60px); overflow-y: auto; padding: 14px; border: 1px solid #29404f; border-radius: 8px; background: rgba(13, 23, 32, 0.96); color: #dbe8f1; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); pointer-events: auto; font-size: 12px; }
+.fixed-pose-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.fixed-pose-dialog h3 { margin: 0; font-size: 14px; }
+.fixed-pose-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fixed-pose-title h3 { flex-shrink: 0; }
+.fixed-pose-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8da2b6; }
+.fixed-pose-dialog header button { flex: 0 0 24px; width: 24px; height: 24px; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.fixed-pose-dialog header svg { width: 18px; height: 18px; }
+.fixed-pose-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.fixed-pose-reference { display: grid; gap: 6px; margin: 8px 0; }
+.fixed-pose-field { display: grid; gap: 5px; min-width: 0; }
+.fixed-pose-field > span { font-size: 10px; }
+.fixed-pose-field input { width: 100%; min-width: 0; height: 32px; padding: 4px 6px; border: 1px solid #29404f; border-radius: 4px; background: #101b26; color: inherit; font: inherit; }
+.fixed-pose-field input:disabled { opacity: 0.5; }
+.fixed-pose-field input:focus { border-color: #39d0e9; outline: 1px solid #39d0e9; }
+.fixed-pose-field small, .fixed-pose-violations, .fixed-pose-status.invalid { color: #ff849e; }
+.fixed-pose-status { margin: 10px 0 0; color: #39d0e9; font-size: 11px; }
+.fixed-pose-violations { margin: 8px 0 0; padding-left: 16px; font-size: 10px; line-height: 1.5; }
+:root[data-theme="light"] .fixed-pose-dialog { background: rgba(247, 250, 252, 0.97); color: #263f54; border-color: #bacbd7; }
+:root[data-theme="light"] .fixed-pose-field input { background: #fff; border-color: #bacbd7; }
 
 .pre-config-workspace {
   grid-template-columns: minmax(340px, 392px) minmax(0, 1fr);
@@ -10,6 +109,75 @@
 
 .pre-config-sidebar .model-settings-form {
   padding-top: 0;
+}
+
+.pre-config-sidebar-tabs {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 4px;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 7px;
+  background: #080e15;
+}
+
+.pre-config-sidebar-tab {
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #8da2b6;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pre-config-sidebar-tab:hover {
+  color: #d8f4fb;
+  background: #101b26;
+}
+
+.pre-config-sidebar-tab[aria-selected="true"] {
+  border-color: rgba(57, 208, 233, 0.4);
+  color: #39d0e9;
+  background: #0d2a33;
+}
+
+.pre-config-sidebar-tab:focus-visible,
+.pre-config-sidebar-panel:focus-visible,
+.pre-config-satellite-list:focus-visible {
+  outline: 2px solid #39d0e9;
+  outline-offset: 2px;
+}
+
+.pre-config-sidebar-panel[hidden] {
+  display: none;
+}
+
+:root[data-theme="light"] .pre-config-sidebar-tabs {
+  border-color: rgba(74, 103, 127, 0.18);
+  background: #f2f6fa;
+}
+
+:root[data-theme="light"] .pre-config-sidebar-tab {
+  color: #587184;
+}
+
+:root[data-theme="light"] .pre-config-sidebar-tab:hover {
+  color: #263f54;
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .pre-config-sidebar-tab[aria-selected="true"] {
+  border-color: rgba(8, 127, 165, 0.4);
+  color: #0a4f66;
+  background: #e8f6fb;
 }
 
 .pre-config-action-row {
@@ -81,10 +249,81 @@
   gap: 8px;
 }
 
+.pre-config-satellite-section {
+  --satellite-control-width: 74px;
+  --satellite-row-padding: 9px;
+  --satellite-scrollbar-width: 4px;
+}
+
+.pre-config-satellite-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--satellite-control-width);
+  align-items: center;
+  gap: 8px 12px;
+  /* 复用行内边距，并计入边框和稳定滚动条槽，使按钮与数量输入框共用中心线。 */
+  padding-right: calc(var(--satellite-row-padding) + 1px + var(--satellite-scrollbar-width));
+}
+
+.pre-config-satellite-footer > .pre-config-hint {
+  min-width: 0;
+}
+
+.pre-config-satellite-reset {
+  justify-self: center;
+  min-width: 80px;
+  height: 24px;
+  margin-left: 0;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pre-config-satellite-reset.is-complete {
+  color: #9dcaba;
+}
+
+:root[data-theme="light"] .pre-config-satellite-reset.is-complete {
+  color: #3c776a;
+}
+
 .pre-config-satellite-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-auto-rows: 47px;
+  /* 容纳八行卫星及七个行间距，更多类型仅在列表内部滚动。 */
+  max-height: calc(8 * 47px + 7 * 8px);
   gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: #29404f transparent;
+  scrollbar-width: thin;
+}
+
+.pre-config-satellite-section .pre-config-satellite-list {
+  /* 列表不足八行时仍保留相同槽宽，避免输入列和底部操作左右跳动。 */
+  scrollbar-gutter: stable;
+}
+
+/* Chromium/WebKit 使用 4px 细滚动条；其他浏览器保留标准 thin 回退。 */
+@supports selector(::-webkit-scrollbar) {
+  .pre-config-satellite-list {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .pre-config-satellite-list::-webkit-scrollbar {
+    width: var(--satellite-scrollbar-width, 4px);
+  }
+
+  .pre-config-satellite-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .pre-config-satellite-list::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: #29404f;
+  }
 }
 
 .pre-config-satellite-row {
@@ -92,10 +331,65 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
+  padding: 7px var(--satellite-row-padding, 9px);
   border: 1px solid rgba(132, 159, 184, 0.16);
   border-radius: 5px;
   background: #0d1720;
+}
+
+.pre-config-symmetry-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.pre-config-symmetry-mode,
+.fixed-constraint-mode {
+  height: 28px;
+  border: 1px solid rgba(132, 159, 184, 0.2);
+  border-radius: 5px;
+  color: #dbe8f1;
+  background: #101b26;
+  font: inherit;
+  font-size: 11px;
+}
+
+.pre-config-symmetry-mode,
+.fixed-constraint-mode {
+  font-weight: 700;
+}
+
+.pre-config-symmetry-mode:disabled,
+.fixed-constraint-mode:disabled {
+  opacity: 0.45;
+}
+
+.pre-config-symmetry-mode:focus-visible,
+.fixed-constraint-mode:focus-visible {
+  outline: 2px solid #39d0e9;
+  outline-offset: 2px;
+}
+
+:root[data-theme="light"] .pre-config-symmetry-mode,
+:root[data-theme="light"] .fixed-constraint-mode {
+  color: #263f54;
+  background: #ffffff;
+  border-color: rgba(74, 103, 127, 0.18);
+}
+
+.pre-config-symmetry-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  accent-color: #087fa5;
+  cursor: pointer;
+}
+
+.pre-config-symmetry-row input:focus-visible {
+  outline: 2px solid #39d0e9;
+  outline-offset: 3px;
+}
+
+.pre-config-symmetry-row input:disabled {
+  cursor: wait;
 }
 
 .pre-config-satellite-meta {
@@ -114,8 +408,11 @@
 }
 
 .pre-config-satellite-meta small {
+  overflow: hidden;
   color: #71879a;
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pre-config-satellite-control {
@@ -125,7 +422,7 @@
 }
 
 .pre-config-satellite-control input {
-  width: 74px;
+  width: var(--satellite-control-width, 74px);
   height: 28px;
   padding: 0 7px 0 23px;
   border: 1px solid rgba(132, 159, 184, 0.2);
@@ -153,6 +450,11 @@
   line-height: 34px;
 }
 
+.pre-config-shape-segments { display: grid; gap: 16px; }
+.pre-config-shape-segment { min-width: 0; margin: 0; padding: 12px; border: 1px solid rgba(132, 159, 184, 0.3); border-radius: 6px; }
+.pre-config-shape-segment legend { padding: 0 6px; color: var(--cyan); font-size: 13px; font-weight: 700; }
+.pre-config-shape-field { align-content: start; }
+
 .pre-config-hint.warn {
   color: #f6ad62;
 }
@@ -171,6 +473,16 @@
   background: #ffffff;
 }
 
+/* 清零操作的底色与模型设置页的安装面按钮保持一致。 */
+:root[data-theme="light"] .pre-config-satellite-reset {
+  background: #f3f8fb;
+}
+
+:root[data-theme="light"] .pre-config-satellite-reset:hover:not(:disabled),
+:root[data-theme="light"] .pre-config-satellite-reset:focus-visible {
+  background: #eaf5f8;
+}
+
 :root[data-theme="light"] .pre-config-action-button.primary {
   border-color: rgba(8, 127, 165, 0.4);
   color: #0a4f66;
@@ -184,6 +496,20 @@
 :root[data-theme="light"] .pre-config-satellite-row {
   border-color: rgba(74, 103, 127, 0.16);
   background: #f7fafc;
+}
+
+:root[data-theme="light"] .pre-config-satellite-list {
+  scrollbar-color: #bacbd7 transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  :root[data-theme="light"] .pre-config-satellite-list {
+    scrollbar-color: auto;
+  }
+
+  :root[data-theme="light"] .pre-config-satellite-list::-webkit-scrollbar-thumb {
+    background: #bacbd7;
+  }
 }
 
 :root[data-theme="light"] .pre-config-satellite-meta strong,

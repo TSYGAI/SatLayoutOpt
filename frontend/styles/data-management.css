@@ -1,4 +1,4 @@
-/** 文件说明：数据管理页样式，依赖公共工作台和主题变量，限定记录列表、双栏详情、预览及窄屏表格的视觉布局。 */
+/** 文件说明：数据管理页样式，依赖公共工作台和主题变量，限定记录列表、双栏详情、预览大窗及包络下载状态的视觉布局。 */
 
 .data-management-page-shell {
   min-height: 100vh;
@@ -396,7 +396,7 @@
 }
 
 .data-management-action svg,
-.data-management-table a svg {
+.data-management-download svg {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
@@ -595,10 +595,16 @@
   height: 100%;
 }
 
-.data-management-fit-view {
+.data-management-preview-tools {
   position: absolute;
   top: 12px;
   right: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.data-management-preview-tools button,
+.data-management-preview-close {
   display: grid;
   width: 32px;
   height: 32px;
@@ -610,14 +616,292 @@
   cursor: pointer;
 }
 
-.data-management-fit-view:hover {
+.data-management-preview-tools button:hover,
+.data-management-preview-close:hover {
   border-color: var(--detail-accent);
   color: var(--detail-accent);
 }
 
-.data-management-fit-view svg {
+.data-management-preview-tools button.is-active {
+  border-color: var(--detail-accent);
+  color: var(--detail-accent);
+  background: color-mix(in srgb, var(--detail-accent) 14%, var(--detail-surface));
+}
+
+.data-management-preview-tools button:focus-visible,
+.data-management-preview-close:focus-visible {
+  outline: 2px solid var(--detail-accent);
+  outline-offset: 3px;
+}
+
+.data-management-preview-tools svg,
+.data-management-preview-close svg {
   width: 15px;
   height: 15px;
+}
+
+/* 原生 dialog 进入浏览器顶层，避开详情容器的滚动、裁切与容器查询尺寸。 */
+.data-management-preview-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(1440px, calc(100vw - 32px));
+  height: calc(100dvh - 48px);
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid var(--detail-border);
+  border-radius: 14px;
+  background: var(--detail-surface);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+  font: inherit;
+}
+
+.data-management-preview-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.data-management-preview-dialog::backdrop {
+  background: rgba(5, 15, 25, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.data-management-preview-dialog-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.data-management-preview-dialog-header > div {
+  min-width: 0;
+}
+
+.data-management-preview-dialog-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.data-management-preview-dialog-header h2 svg {
+  width: 20px;
+  height: 20px;
+  color: var(--detail-accent);
+}
+
+.data-management-preview-dialog-header p {
+  margin: 4px 0 0;
+  color: var(--detail-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.data-management-preview-dialog .data-management-preview {
+  min-height: 0;
+}
+
+.data-management-preview-dialog .data-management-preview-caption {
+  flex: 0 0 auto;
+}
+
+/* 删除确认使用页面顶层原生 dialog，保证小窗、滚动容器和窄屏下都保持屏幕居中。 */
+.data-management-delete-dialog {
+  --detail-surface: #0c151f;
+  --detail-subtle: #101e2b;
+  --detail-border: rgba(152, 177, 199, 0.16);
+  --detail-muted: #91a6b9;
+  --detail-accent: #39d0e9;
+  --detail-danger: #ffb3bf;
+  position: fixed;
+  inset: 0;
+  width: min(440px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid var(--detail-border);
+  border-radius: 14px;
+  background: var(--detail-surface);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+  font: inherit;
+  line-height: 1.6;
+}
+
+:root[data-theme="light"] .data-management-delete-dialog {
+  --detail-surface: #ffffff;
+  --detail-subtle: #f5f8fa;
+  --detail-border: #e1e8ee;
+  --detail-muted: #657b8c;
+  --detail-accent: #087fa5;
+  --detail-danger: #ac4c59;
+}
+
+.data-management-delete-dialog::backdrop {
+  background: rgba(5, 15, 25, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+.data-management-delete-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.data-management-delete-dialog-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.data-management-delete-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #ed9cac;
+  background: rgba(180, 64, 83, 0.16);
+}
+
+.data-management-delete-dialog-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.data-management-delete-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--detail-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.data-management-delete-dialog-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.data-management-delete-dialog-close:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--detail-subtle);
+}
+
+.data-management-delete-dialog-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  color: var(--detail-muted);
+  font-size: 13px;
+}
+
+.data-management-delete-dialog-body p,
+.data-management-delete-dialog-record {
+  margin: 0;
+}
+
+.data-management-delete-dialog-record {
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--detail-border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--detail-subtle);
+  font-size: 14px;
+}
+
+.data-management-delete-dialog-error,
+.data-management-delete-dialog-progress {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.data-management-delete-dialog-error { color: #ed9cac; }
+.data-management-delete-dialog-progress { color: var(--detail-accent); }
+
+.data-management-delete-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.data-management-delete-dialog-actions button {
+  min-width: 84px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--detail-border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--detail-subtle);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.data-management-delete-dialog-actions button:hover:not(:disabled) {
+  border-color: var(--detail-accent);
+}
+
+.data-management-delete-dialog-actions .data-management-delete-dialog-confirm {
+  border-color: var(--detail-danger);
+  color: #ffffff;
+  background: var(--detail-danger);
+}
+
+.data-management-delete-dialog-actions .data-management-delete-dialog-confirm:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.data-management-delete-dialog button:focus-visible {
+  outline: 2px solid var(--detail-accent);
+  outline-offset: 3px;
+}
+
+.data-management-delete-dialog button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.data-management-page-shell > #toast.toast-centered {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+@media (max-width: 620px) {
+  .data-management-preview-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .data-management-delete-dialog {
+    width: calc(100vw - 16px);
+    padding: 20px;
+    border-radius: 10px;
+  }
 }
 
 .data-management-preview-caption {
@@ -732,16 +1016,27 @@
   text-align: center;
 }
 
-.data-management-table a {
+.data-management-download {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 0;
+  border: 0;
   color: var(--detail-accent);
+  background: transparent;
+  font: inherit;
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.data-management-table a:hover {
+.data-management-download:hover:not(:disabled) {
   text-decoration: underline;
+}
+
+.data-management-download:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .data-management-technical {

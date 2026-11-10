@@ -10,6 +10,7 @@ import trimesh
 from shapely.geometry import MultiPoint
 
 from app.domain.layout_config import LAYOUT_CONFIG
+from app.domain.layout_mount_cache import cached_mount
 
 
 class MountOrientationError(ValueError):
@@ -40,6 +41,11 @@ def model_up_direction(model):
 
 
 def orient_for_mount(model, mount, roll_quarters=0):
+    """计算指定安装姿态；独立引擎可在当前求解上下文中缓存结果，普通调用不保留模型。"""
+    return cached_mount(model, mount, roll_quarters, _orient_for_mount)
+
+
+def _orient_for_mount(model, mount, roll_quarters=0):
     """返回满足安装面与可选向上轴的刚性副本；自由模式只对齐安装面，再按 roll_quarters 滚转。
 
     固定轴侧挂姿态唯一，非零滚转或方向冲突抛 MountOrientationError；顶部和自由模式支持四种转角。

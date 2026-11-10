@@ -1,1 +1,2 @@
-start-dev.bat text eol=crlf
+# Windows 桌面启动批处理使用 CRLF，保证 CMD 按行解析命令。
+start-desktop.bat text eol=crlf
