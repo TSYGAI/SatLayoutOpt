@@ -63,4 +63,10 @@ GitHub 源码以桌面启动入口及其必要依赖为分发范围，开发测�
 
 ## 开源许可
 
-本项目采用 MIT License，详见 [LICENSE](https://github.com/TSYGAI/SatLayoutOpt/blob/main/LICENSE)。
+Copyright (c) 2026 天枢摇光（北京）科技有限公司
+
+本项目自有代码采用 GNU General Public License 第 3 版（仅该版本，`GPL-3.0-only`）授权，完整条款见 [LICENSE](LICENSE)。
+
+你可以依据 GPLv3 使用、修改和分发本项目；分发修改版或二进制版本时，须遵守 GPLv3 关于版权声明、许可证和对应源码的要求。本项目按“现状”提供，不作任何担保，具体以许可证条款为准。
+
+第三方组件、依赖和引用代码保留各自的版权声明与许可证，本项目的许可证声明不替代其原有授权。

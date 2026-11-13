@@ -4,6 +4,8 @@
 name = "sat-layout-desktop"
 # 依赖包版本；应用展示版本由集中配置的 packaging.version 派生。
 version = "0.3.0"
+# 项目自有代码采用 GPL 第 3 版，仅适用该版本。
+license = "GPL-3.0-only"
 # Rust 语言版本。
 edition = "2021"
 # 构建时生成 Tauri 上下文的入口。

@@ -4,6 +4,8 @@
 name = "sat-layout-api"
 # 与当前 API 兼容版本一致。
 version = "0.3.0"
+# 项目自有代码采用 GPL 第 3 版，仅适用该版本。
+license = "GPL-3.0-only"
 # Rust 语言版本。
 edition = "2021"
 
